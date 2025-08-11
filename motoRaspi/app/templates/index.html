@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MotoPlayer 即時儀表板 v2</title>
+    <!-- [修改] 引入本地化的資源 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/fonts.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .echart-container {
+            width: 100%;
+            height: 300px;
+        }
+        @media (min-width: 768px) {
+            .echart-container {
+                height: 350px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+    <div class="container mx-auto p-4 md:p-6 lg:p-8">
+        <header class="mb-6 flex flex-wrap justify-between items-center gap-4">
+            <div>
+                <h1 class="text-3xl md:text-4xl font-bold text-white">MotoPlayer 即時儀表板</h1>
+                <p class="text-gray-400">ECharts 視覺化引擎</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2">
+                    <span id="wsStatusIndicator" class="h-4 w-4 rounded-full bg-gray-600 transition-colors duration-500"></span>
+                    <span id="wsStatusText" class="text-gray-400">未連線</span>
+                </div>
+                <a href="/history" class="px-4 py-2 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 transition-colors">
+                    查看騎行日誌
+                </a>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+            
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg col-span-1 md:col-span-2">
+                <h2 class="text-lg font-semibold text-cyan-400 mb-2">引擎轉速 (RPM)</h2>
+                <div id="rpmGauge" class="echart-container"></div>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg col-span-1 md:col-span-2">
+                <h2 class="text-lg font-semibold text-green-400 mb-2">時速 (Speed)</h2>
+                <div id="speedGauge" class="echart-container"></div>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center justify-center"><h2 class="text-lg font-semibold text-gray-400 mb-2">檔位</h2><p id="gearDisplay" class="text-7xl font-black text-white">--</p></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">引擎水溫</h2><p class="text-4xl font-bold text-red-400"><span id="coolantTempDisplay">--</span> &deg;C</p></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">電瓶電壓</h2><p class="text-4xl font-bold text-yellow-400"><span id="voltageDisplay">--</span> V</p></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">系統狀態</h2><div class="flex items-center"><span id="unoStatusIndicator" class="h-4 w-4 rounded-full bg-gray-600 mr-2"></span><span id="unoStatusText" class="text-xl text-gray-400">未知</span></div></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">環境溫度</h2><p class="text-4xl font-bold text-blue-400"><span id="envTempDisplay">--</span> &deg;C</p></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">體感溫度</h2><p class="text-4xl font-bold text-purple-400"><span id="feelsLikeDisplay">--</span> &deg;C</p></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">環境濕度</h2><p class="text-4xl font-bold text-indigo-400"><span id="humidityDisplay">--</span> %</p></div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">光照強度</h2><p class="text-4xl font-bold text-amber-300"><span id="lightDisplay">--</span></p></div>
+        </main>
+    </div>
+    <script>
+        // JavaScript 邏輯完全維持不變
+        const gearDisplay = document.getElementById('gearDisplay'), coolantTempDisplay = document.getElementById('coolantTempDisplay'), voltageDisplay = document.getElementById('voltageDisplay'), unoStatusIndicator = document.getElementById('unoStatusIndicator'), unoStatusText = document.getElementById('unoStatusText'), envTempDisplay = document.getElementById('envTempDisplay'), feelsLikeDisplay = document.getElementById('feelsLikeDisplay'), humidityDisplay = document.getElementById('humidityDisplay'), lightDisplay = document.getElementById('lightDisplay');
+        const wsStatusIndicator = document.getElementById('wsStatusIndicator'), wsStatusText = document.getElementById('wsStatusText');
+        const rpmGauge = echarts.init(document.getElementById('rpmGauge'));
+        const speedGauge = echarts.init(document.getElementById('speedGauge'));
+        const getRpmOption = (rpmValue) => ({
+            series: [{ type: 'gauge', center: ['50%', '60%'], startAngle: 200, endAngle: -20, min: 0, max: 12000, splitNumber: 12, itemStyle: { color: '#22D3EE' }, progress: { show: true, width: 20 }, pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 8, offsetCenter: [0, '-50%'] }, axisLine: { lineStyle: { width: 20, color: [[0.75, '#67e8f9'], [0.9, '#fde047'], [1, '#f87171']] } }, axisTick: { distance: -30, length: 8, lineStyle: { color: '#fff', width: 2 } }, splitLine: { distance: -35, length: 14, lineStyle: { color: '#fff', width: 3 } }, axisLabel: { distance: -10, color: '#fff', fontSize: 14, formatter: function (value) { return value / 1000 + 'k'; } }, anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5, borderColor: '#22D3EE' } }, title: { show: false }, detail: { valueAnimation: true, fontSize: 30, color: '#fff', offsetCenter: [0, '70%'], formatter: '{value}' }, data: [{ value: rpmValue }] }]
+        });
+        const getSpeedOption = (speedValue) => ({
+            series: [{ type: 'gauge', center: ['50%', '60%'], startAngle: 200, endAngle: -20, min: 0, max: 200, splitNumber: 10, itemStyle: { color: '#4ADE80' }, progress: { show: true, width: 20 }, pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 8, offsetCenter: [0, '-50%'] }, axisLine: { lineStyle: { width: 20, color: [[1, '#6EE7B7']] } }, axisTick: { distance: -30, length: 8, lineStyle: { color: '#fff', width: 2 } }, splitLine: { distance: -35, length: 14, lineStyle: { color: '#fff', width: 3 } }, axisLabel: { distance: -10, color: '#fff', fontSize: 14 }, anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5, borderColor: '#4ADE80' } }, title: { show: false }, detail: { valueAnimation: true, fontSize: 30, color: '#fff', offsetCenter: [0, '70%'], formatter: '{value} km/h' }, data: [{ value: speedValue }] }]
+        });
+        const updateUI = (data) => {
+            rpmGauge.setOption(getRpmOption(data.rpm || 0));
+            speedGauge.setOption(getSpeedOption(data.speed || 0));
+            gearDisplay.textContent = data.gear === 0 ? 'N' : (data.gear ?? '--');
+            coolantTempDisplay.textContent = data.coolant_temp?.toFixed(1) ?? '--';
+            voltageDisplay.textContent = data.battery_voltage?.toFixed(2) ?? '--';
+            envTempDisplay.textContent = data.temperature?.toFixed(1) ?? '--';
+            feelsLikeDisplay.textContent = data.feels_like?.toFixed(1) ?? '--';
+            humidityDisplay.textContent = data.humidity?.toFixed(1) ?? '--';
+            lightDisplay.textContent = data.light_level ?? '--';
+            if (data.uno_status === 'Online') {
+                unoStatusIndicator.className = 'h-4 w-4 rounded-full bg-green-500 mr-2';
+                unoStatusText.textContent = '連線正常'; unoStatusText.className = 'text-green-400';
+            } else {
+                unoStatusIndicator.className = 'h-4 w-4 rounded-full bg-red-500 mr-2';
+                unoStatusText.textContent = '連線中斷'; unoStatusText.className = 'text-red-400';
+            }
+        };
+        const socket = io();
+        socket.on('connect', () => {
+            console.log('WebSocket 已連接！');
+            wsStatusIndicator.className = 'h-4 w-4 rounded-full bg-green-500 transition-colors duration-500';
+            wsStatusText.textContent = '已連線';
+        });
+        socket.on('disconnect', () => {
+            console.log('WebSocket 已斷線！');
+            wsStatusIndicator.className = 'h-4 w-4 rounded-full bg-red-500 transition-colors duration-500';
+            wsStatusText.textContent = '已斷線';
+        });
+        socket.on('update_data', (data) => {
+            updateUI(data);
+        });
+        window.addEventListener('resize', () => {
+            rpmGauge.resize();
+            speedGauge.resize();
+        });
+        rpmGauge.setOption(getRpmOption(0));
+        speedGauge.setOption(getSpeedOption(0));
+    </script>
+</body>
+</html>

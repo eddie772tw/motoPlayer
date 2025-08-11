@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>騎行詳情 - MotoPlayer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/fonts.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chartjs-adapter-date-fns.bundle.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chartjs-plugin-zoom.min.js') }}"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .toggle-btn { opacity: 0.5; transition: all 0.2s ease-in-out; }
+        .toggle-btn.active { opacity: 1; transform: scale(1.05); box-shadow: 0 0 10px rgba(255, 255, 255, 0.3); }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+    <div class="container mx-auto p-4 md:p-6 lg:p-8">
+        <header class="mb-6">
+            <div class="flex flex-wrap justify-between items-center gap-4">
+                <div>
+                    <h1 class="text-3xl md:text-4xl font-bold text-white">騎行詳情</h1>
+                    <p id="trip-subtitle" class="text-gray-400">正在載入 Trip ID: {{ trip_id }} 的數據...</p>
+                </div>
+                <!-- [修改] 新增匯出按鈕 -->
+                <div class="flex items-center space-x-2">
+                    <a id="export-csv-btn" href="#" class="px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition-colors">
+                        匯出 CSV
+                    </a>
+                    <a href="/history" class="px-4 py-2 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 transition-colors">
+                        返回日誌列表
+                    </a>
+                </div>
+            </div>
+        </header>
+
+        <main id="charts-container" class="space-y-6">
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
+                    <h2 class="text-lg font-semibold text-white">動力數據 (Speed / RPM / Gear)</h2>
+                    <!-- [修改] 新增取樣頻率控制 -->
+                    <div class="flex items-center space-x-2">
+                         <label for="sampling-interval" class="text-sm text-gray-400">取樣頻率 (秒):</label>
+                         <input type="number" id="sampling-interval" value="1" min="1" class="bg-gray-700 text-white rounded w-20 text-center">
+                    </div>
+                    <div id="toggle-buttons" class="flex space-x-2">
+                        <button data-dataset-index="0" class="toggle-btn active px-3 py-1 text-sm font-medium rounded-full bg-green-500 text-white">時速</button>
+                        <button data-dataset-index="1" class="toggle-btn active px-3 py-1 text-sm font-medium rounded-full bg-cyan-500 text-white">轉速</button>
+                        <button data-dataset-index="2" class="toggle-btn active px-3 py-1 text-sm font-medium rounded-full bg-purple-500 text-white">檔位</button>
+                    </div>
+                </div>
+                <div class="relative h-96 md:h-96">
+                    <canvas id="combinedChart"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <h2 class="text-lg font-semibold text-red-400 mb-2">溫度 (°C)</h2>
+                <div class="relative h-80 md:h-96">
+                    <canvas id="tempChart"></canvas>
+                </div>
+            </div>
+        </main>
+        
+        <div id="loading-indicator" class="text-center py-12 text-gray-400"></div>
+    </div>
+
+    <script>
+        const tripId = {{ trip_id }};
+        const subtitle = document.getElementById('trip-subtitle');
+        const chartsContainer = document.getElementById('charts-container');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const toggleButtonsContainer = document.getElementById('toggle-buttons');
+        const samplingInput = document.getElementById('sampling-interval');
+        const exportBtn = document.getElementById('export-csv-btn');
+
+        let combinedChart, tempChart;
+        let originalTripData = []; // [新增] 用於儲存原始的、未經處理的數據
+
+        // (aggregateDataByTime, syncCharts, createLineChart 維持不變)
+        const aggregateDataByTime = (data, intervalSeconds = 1) => {
+            if (!data || data.length === 0) return [];
+            const intervalMs = intervalSeconds * 1000; const buckets = new Map();
+            data.forEach(point => { const timestamp = new Date(point.timestamp).getTime(); const bucketKey = Math.floor(timestamp / intervalMs) * intervalMs; if (!buckets.has(bucketKey)) { buckets.set(bucketKey, []); } buckets.get(bucketKey).push(point); });
+            const aggregatedData = []; const numericFields = ['speed', 'rpm', 'coolant_temp', 'temperature', 'humidity', 'light_level', 'battery_voltage']; const integerFields = ['speed', 'rpm', 'light_level'];
+            for (const [bucketKey, pointsInBucket] of buckets) {
+                if (pointsInBucket.length === 0) continue;
+                const lastPoint = pointsInBucket[pointsInBucket.length - 1]; const aggregatedPoint = { ...lastPoint }; aggregatedPoint.timestamp = new Date(bucketKey).toISOString();
+                numericFields.forEach(field => { const values = pointsInBucket.map(p => p[field]).filter(v => v !== null && v !== undefined); if (values.length > 0) { const sum = values.reduce((acc, val) => acc + val, 0); const avg = sum / values.length; aggregatedPoint[field] = integerFields.includes(field) ? Math.round(avg) : avg; } });
+                aggregatedData.push(aggregatedPoint);
+            }
+            return aggregatedData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        };
+        const syncCharts = (sourceChart, targetChart) => { if (sourceChart && targetChart) { const { min, max } = sourceChart.scales.x; if (targetChart.scales.x.min !== min || targetChart.scales.x.max !== max) { targetChart.scales.x.min = min; targetChart.scales.x.max = max; targetChart.update('none'); } } };
+        const createLineChart = (ctx, data, options) => new Chart(ctx, { type: 'line', data, options });
+
+        // --- [新增] 重繪圖表的函式 ---
+        const redrawCharts = () => {
+            if (!originalTripData.length) return;
+
+            const interval = parseInt(samplingInput.value, 10) || 1;
+            const aggregatedTripData = aggregateDataByTime(originalTripData, interval);
+            
+            const startTime = new Date(originalTripData[0].timestamp);
+            subtitle.textContent = `開始於 ${startTime.toLocaleString('zh-TW')} (每 ${interval} 秒聚合為 ${aggregatedTripData.length} 個數據點)`;
+
+            const getChartOptions = (yAxesConfig) => ({
+                responsive: true, maintainAspectRatio: false,
+                scales: { x: { type: 'time', time: { unit: 'minute', tooltipFormat: 'yyyy-MM-dd HH:mm:ss' }, ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } }, ...yAxesConfig },
+                plugins: { legend: { display: false }, zoom: { pan: { enabled: true, mode: 'x', onPanComplete: ({ chart }) => { (chart.canvas.id === 'combinedChart') ? syncCharts(chart, tempChart) : syncCharts(chart, combinedChart); } }, zoom: { wheel: { enabled: true, speed: 0.1 }, mode: 'x', onZoomComplete: ({ chart }) => { (chart.canvas.id === 'combinedChart') ? syncCharts(chart, tempChart) : syncCharts(chart, combinedChart); } } } },
+                interaction: { intersect: false, mode: 'index' },
+            });
+
+            const initialWindowMs = 60 * 60 * 1000;
+            const initialXMax = startTime.getTime() + initialWindowMs;
+
+            const combinedChartData = {
+                datasets: [
+                    { label: '時速 (km/h)', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp).getTime(), y: d.speed})), borderColor: '#4ADE80', backgroundColor: 'rgba(74, 222, 128, 0.2)', fill: false, tension: 0.2, pointRadius: 0, yAxisID: 'y' },
+                    { label: '轉速 (RPM)', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp).getTime(), y: d.rpm})), borderColor: '#22D3EE', backgroundColor: 'rgba(34, 211, 238, 0.2)', fill: false, tension: 0.2, pointRadius: 0, yAxisID: 'y1' },
+                    { label: '檔位', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp).getTime(), y: d.gear})), borderColor: '#A78BFA', stepped: true, fill: false, pointRadius: 0, yAxisID: 'y2' } 
+                ]
+            };
+            const combinedChartOptions = getChartOptions({
+                y: { type: 'linear', position: 'left', beginAtZero: true, ticks: { color: '#4ADE80' }, grid: { color: '#374151' }, title: { display: true, text: '時速 (km/h)', color: '#4ADE80' } },
+                y1: { type: 'linear', position: 'right', beginAtZero: true, ticks: { color: '#22D3EE' }, grid: { drawOnChartArea: false }, title: { display: true, text: '轉速 (RPM)', color: '#22D3EE' } },
+                y2: { type: 'linear', position: 'right', beginAtZero: true, ticks: { stepSize: 1, color: '#A78BFA' }, grid: { drawOnChartArea: false }, title: { display: true, text: '檔位', color: '#A78BFA' } }
+            });
+            combinedChartOptions.scales.x.min = startTime.getTime();
+            combinedChartOptions.scales.x.max = initialXMax;
+            if (combinedChart) combinedChart.destroy(); // 銷毀舊圖表
+            combinedChart = createLineChart(document.getElementById('combinedChart').getContext('2d'), combinedChartData, combinedChartOptions);
+
+            const tempChartData = {
+                datasets: [
+                    { label: '引擎水溫', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp).getTime(), y: d.coolant_temp})), borderColor: '#F87171', fill: false, tension: 0.1, pointRadius: 0 },
+                    { label: '環境溫度', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp).getTime(), y: d.temperature})), borderColor: '#60A5FA', fill: false, tension: 0.1, pointRadius: 0 }
+                ]
+            };
+            const tempChartOptions = getChartOptions({ y: { beginAtZero: false, ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } } });
+            tempChartOptions.plugins.legend = { labels: { color: '#D1D5DB' } };
+            tempChartOptions.scales.x.min = startTime.getTime();
+            tempChartOptions.scales.x.max = initialXMax;
+            if (tempChart) tempChart.destroy(); // 銷毀舊圖表
+            tempChart = createLineChart(document.getElementById('tempChart').getContext('2d'), tempChartData, tempChartOptions);
+        };
+        
+        const fetchTripData = async () => {
+            chartsContainer.style.display = 'none';
+            loadingIndicator.textContent = `正在載入 Trip ID: ${tripId} 的數據...`;
+            try {
+                const response = await fetch(`/api/trip_data?id=${tripId}`);
+                if (!response.ok) throw new Error(`HTTP 錯誤！ 狀態碼: ${response.status}`);
+                originalTripData = await response.json(); // [修改] 儲存原始數據
+                if (originalTripData.length === 0) throw new Error('找不到此騎行的數據。');
+                
+                loadingIndicator.style.display = 'none';
+                chartsContainer.style.display = 'block';
+
+                // [修改] 設定匯出按鈕的連結
+                exportBtn.href = `/api/trip/${tripId}/export`;
+
+                redrawCharts(); // [修改] 呼叫重繪函式
+            } catch (error) {
+                console.error("無法獲取騎行詳情:", error);
+                chartsContainer.style.display = 'none';
+                loadingIndicator.textContent = `載入失敗: ${error.message}`;
+                loadingIndicator.classList.add('text-red-400');
+            }
+        };
+ 
+        toggleButtonsContainer.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (button) {
+                button.classList.toggle('active');
+                if (combinedChart) {
+                    combinedChart.setDatasetVisibility(button.dataset.datasetIndex, !combinedChart.isDatasetVisible(button.dataset.datasetIndex));
+                    combinedChart.update();
+                }
+            }
+        });
+        
+        // [新增] 監聽取樣頻率輸入框的變化
+        samplingInput.addEventListener('change', redrawCharts);
+ 
+        fetchTripData();
+    </script>
+</body>
+</html>
