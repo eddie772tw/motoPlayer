@@ -1,4 +1,4 @@
-# obd_reader.py
+# real_obd.py
 
 import serial
 import time
@@ -6,7 +6,7 @@ from typing import Optional
 
 # 專案結構假設:
 # /project_root
-# ├── obd_reader.py  (此檔案)
+# ├── real_obd.py  (此檔案)
 # └── /app
 #     └── models.py
 # 如果執行此檔案時出現 ModuleNotFoundError，
@@ -272,4 +272,3 @@ if __name__ == '__main__':
         # 無論如何，最後都要確保連線被關閉
         print("正在關閉連線...")
         obd_sensor.disconnect()
-

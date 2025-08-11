@@ -14,7 +14,28 @@ from statistics import mean
 
 from . import state
 from app.models import MotoData, EnvironmentalData, SystemStatus
-from mock_obd import MockOBD
+import config
+
+# --- OBD 感測器初始化 ---
+obd_sensor = None
+if config.OBD_MODE == 'REAL':
+    try:
+        from real_obd import RealOBD
+        print(f"--- 使用真實OBD模式 (埠: {config.REAL_OBD_PORT}) ---")
+        obd_sensor = RealOBD(port=config.REAL_OBD_PORT, baudrate=config.REAL_OBD_BAUDRATE)
+        if not obd_sensor.connect():
+            print("[WARNING] 無法連接到真實OBD感測器，將退回使用模擬器。")
+            from mock_obd import MockOBD
+            obd_sensor = MockOBD()
+    except (ImportError, FileNotFoundError):
+        print("[ERROR] 'real_obd.py' 檔案不存在或無法匯入，將退回使用模擬器。")
+        from mock_obd import MockOBD
+        obd_sensor = MockOBD()
+else:
+    from mock_obd import MockOBD
+    print("--- 使用模擬OBD模式 ---")
+    obd_sensor = MockOBD()
+
 
 # --- 設定 (維持不變) ---
 NODEMCU_HOSTNAME = "motoplayer.local"
@@ -26,7 +47,6 @@ WEBSOCKET_PUSH_INTERVAL_MS = 200
 DB_WRITE_INTERVAL_S = 60
 
 # --- 初始化 (維持不變) ---
-mock_obd_sensor = MockOBD()
 socketio = SocketIO()
 
 # --- 背景任務函式 (維持不變) ---
@@ -38,7 +58,7 @@ def find_mcu_ip():
         if state.mcu_ip_address is not None: print(f"[WARNING] mDNS: 無法解析 '{NODEMCU_HOSTNAME}'。"); state.mcu_ip_address = None
 
 def fetch_obd_data():
-    obd_data_obj = mock_obd_sensor.get_obd_data()
+    obd_data_obj = obd_sensor.get_obd_data()
     with state.state_lock:
         state.shared_state["obd"] = obd_data_obj
 
