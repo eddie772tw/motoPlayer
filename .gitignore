@@ -26,3 +26,6 @@ logs/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# db
+motoplayer.db
