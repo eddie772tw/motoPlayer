@@ -1,0 +1,2190 @@
+package com.home.net;
+
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
+import android.os.Handler;
+import com.clj.fastble.data.BleDevice;
+import com.common.uitl.ListUtiles;
+import com.common.uitl.LogUtil;
+import com.common.uitl.StringUtils;
+import com.common.uitl.Tool;
+import com.home.activity.main.MainActivity_BLE;
+import com.home.base.LedBleApplication;
+import com.home.bean.MyColor;
+import com.home.constant.CommonConstant;
+import com.home.db.GroupDevice;
+import com.home.db.GroupDeviceDao;
+import com.home.fragment.service.ServicesFragment;
+import com.home.utils.Utils;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import okhttp3.internal.ws.WebSocketProtocol;
+
+/* loaded from: C:\Users\user\Downloads\LEDLAMP\classes.dex */
+public class NetConnectBle {
+    private static final String TAG = "NetConnectBle";
+    private static NetConnectBle netConnect;
+    public static Set<String> setAddress;
+    private NetExceptionInterface exceptionCallBack;
+    private ArrayList<GroupDevice> groupDevices;
+    private String groupName;
+    Handler handler;
+    Handler handlerrgb;
+    private int k;
+    boolean aa = true;
+    int idx = 0;
+
+    static /* synthetic */ int access$008(NetConnectBle netConnectBle) {
+        int i = netConnectBle.k;
+        netConnectBle.k = i + 1;
+        return i;
+    }
+
+    public NetConnectBle() {
+        setAddress = new HashSet();
+    }
+
+    public static NetConnectBle getInstance() {
+        if (netConnect == null) {
+            netConnect = new NetConnectBle();
+        }
+        return netConnect;
+    }
+
+    public static NetConnectBle getInstanceByGroup(String str) {
+        if (netConnect == null) {
+            netConnect = new NetConnectBle();
+        }
+        netConnect.setGroupName(str);
+        return netConnect;
+    }
+
+    public void sendCharacteristic(byte[] bArr) {
+        HashMap<String, BluetoothGatt> bleGattMap = LedBleApplication.getApp().getBleGattMap();
+        if (bleGattMap == null || bleGattMap.isEmpty()) {
+            return;
+        }
+        if (!ListUtiles.isEmpty(this.groupDevices) || StringUtils.isEmpty(this.groupName)) {
+            Iterator<Map.Entry<String, BluetoothGatt>> it = bleGattMap.entrySet().iterator();
+            while (it.hasNext()) {
+                try {
+                    BluetoothGatt value = it.next().getValue();
+                    BluetoothGattService service = value.getService(UUID.fromString(CommonConstant.FFE0));
+                    BluetoothGattCharacteristic characteristic = service.getCharacteristic(UUID.fromString(CommonConstant.FFE1));
+                    if (service != null && setAddress.contains(value.getDevice().getAddress()) && characteristic != null) {
+                        characteristic.setValue(bArr);
+                        value.writeCharacteristic(characteristic);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    public String getGroupName() {
+        return this.groupName;
+    }
+
+    public ArrayList<GroupDevice> getDevicesByGroup() {
+        return this.groupDevices;
+    }
+
+    public void setGroupName(String str) {
+        ArrayList<BleDevice> bleDevices;
+        this.groupName = str;
+        setAddress.clear();
+        GroupDeviceDao groupDeviceDao = new GroupDeviceDao(LedBleApplication.getApp());
+        int i = 0;
+        if (StringUtils.isEmpty(str)) {
+            if (ServicesFragment.sceneBeanFragment == null || ServicesFragment.sceneBeanFragment == null) {
+                return;
+            }
+            if (ServicesFragment.sceneBeanFragment.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                bleDevices = LedBleApplication.getApp().isAuto() ? LedBleApplication.getApp().getBleDevices() : LedBleApplication.getApp().getManmualBleDevices();
+            } else {
+                bleDevices = LedBleApplication.getApp().isAuto() ? LedBleApplication.getApp().getBleDevices() : LedBleApplication.getApp().getManmualBleDevices();
+            }
+            if (bleDevices != null) {
+                int size = bleDevices.size();
+                while (i < size) {
+                    if (bleDevices.get(i) != null) {
+                        setAddress.add(bleDevices.get(i).getMac());
+                    }
+                    i++;
+                }
+                return;
+            }
+            return;
+        }
+        if (StringUtils.isEmpty(str) || "null".equalsIgnoreCase(str)) {
+            this.groupDevices = groupDeviceDao.getAllGroupDevices();
+        } else {
+            this.groupDevices = groupDeviceDao.getDevicesByGroup(str);
+        }
+        while (ListUtiles.getListSize(this.groupDevices) > 0 && i < this.groupDevices.size()) {
+            setAddress.add(this.groupDevices.get(i).getAddress());
+            i++;
+        }
+    }
+
+    public NetConnectBle(NetExceptionInterface netExceptionInterface) {
+        this.exceptionCallBack = netExceptionInterface;
+    }
+
+    public void setPassword(int i, int i2, int i3, int i4, int i5, int i6, int i7) {
+        try {
+            sendDataWithCallback(new int[]{42, i, i2, i3, i4, i5, i6, i7, 175});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPasswordFeedback() {
+        try {
+            sendPasswordDataWithCallback(new int[]{42, 5, 255, 255, 255, 255, 255, 255, 175});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendPasswordDataWithCallback(int[] iArr) {
+        List<BluetoothGattDescriptor> descriptors;
+        try {
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            for (int i : iArr) {
+                byteArrayOutputStream.write(Tool.int2bytearray(i));
+            }
+            byte[] byteArray = byteArrayOutputStream.toByteArray();
+            HashMap<String, BluetoothGatt> bleGattMap = LedBleApplication.getApp().getBleGattMap();
+            if (bleGattMap == null || bleGattMap.isEmpty()) {
+                return;
+            }
+            if (!ListUtiles.isEmpty(this.groupDevices) || StringUtils.isEmpty(this.groupName)) {
+                Iterator<Map.Entry<String, BluetoothGatt>> it = bleGattMap.entrySet().iterator();
+                while (it.hasNext()) {
+                    try {
+                        BluetoothGatt value = it.next().getValue();
+                        BluetoothGattCharacteristic characteristic = value.getService(UUID.fromString(CommonConstant.FFE0)).getCharacteristic(UUID.fromString(CommonConstant.FFE1));
+                        if (characteristic != null) {
+                            characteristic.setValue(byteArray);
+                            value.writeCharacteristic(characteristic);
+                            if (value.setCharacteristicNotification(characteristic, true) && (descriptors = characteristic.getDescriptors()) != null && descriptors.size() > 0) {
+                                for (BluetoothGattDescriptor bluetoothGattDescriptor : descriptors) {
+                                    bluetoothGattDescriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                                    value.writeDescriptor(bluetoothGattDescriptor);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        } catch (IOException e2) {
+            e2.printStackTrace();
+        }
+    }
+
+    public void turnOn(String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE) || str.contains("LEDCAR-00-")) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 1, 0, 255, 255, 0, 239});
+            } else if (str.contains("LEDCAR-01-")) {
+                sendData(new int[]{123, 255, 4, 1, 255, 255, 255, 255, 191});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 4, 4, 1, 255, 255, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                sendData(new int[]{125, 1, 1, 1, 255, 255, 255, 255, 223});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIGHT) || str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 1, 255, 255, 255, 255, 239});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                sendData(new int[]{122, 1, 1, 255, 255, 255, 255, 255, 175});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 1, 1, 255, 255, 255, 255, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void bledmxturnOn(String str, boolean z, boolean z2, boolean z3, boolean z4) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                sendData(z4 ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 5, 255, 255, 255, 255, 239} : z3 ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 3, 255, 255, 255, 255, 239} : new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 1, 255, 255, 255, 255, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(z4 ? new int[]{123, 255, 4, 7, 255, 255, 255, 255, 191} : z2 ? new int[]{123, 255, 4, 5, 255, 255, 255, 255, 191} : z3 ? new int[]{123, 255, 4, 3, 255, 255, 255, 255, 191} : new int[]{123, 255, 4, 1, 255, 255, 255, 255, 191});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void bledmxturnOff(String str, boolean z, boolean z2, boolean z3, boolean z4) {
+        int[] iArr = null;
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                iArr = z4 ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 4, 255, 255, 255, 255, 239} : z3 ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 2, 255, 255, 255, 255, 239} : new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 0, 255, 255, 255, 255, 239};
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                iArr = z4 ? new int[]{123, 255, 4, 6, 255, 255, 255, 255, 191} : z2 ? new int[]{123, 255, 4, 4, 255, 255, 255, 255, 191} : z3 ? new int[]{123, 255, 4, 2, 255, 255, 255, 255, 191} : new int[]{123, 255, 4, 0, 255, 255, 255, 255, 191};
+                sendData(iArr);
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void carturnOn(String str, boolean z, boolean z2) {
+        try {
+            if (z2) {
+                sendData(new int[]{123, 255, 4, 7, 255, 255, 255, 255, 191});
+            } else if (z) {
+                sendData(new int[]{123, 255, 4, 1, 255, 255, 255, 255, 191});
+            } else {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 1, 255, 255, 255, 255, 239});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void carturnOff(String str, boolean z, boolean z2) {
+        try {
+            if (z2) {
+                sendData(new int[]{123, 255, 4, 6, 255, 255, 255, 255, 191});
+            } else if (z) {
+                sendData(new int[]{123, 255, 4, 0, 255, 255, 255, 255, 191});
+            } else {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 0, 255, 255, 255, 255, 239});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void ble02turnOnOff(int i, int i2) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, i, 0, 255, 255, i2, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void turnOff(String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE) || str.contains("LEDCAR-00-")) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 0, 0, 255, 255, 0, 239});
+            } else if (str.contains("LEDCAR-01-")) {
+                sendData(new int[]{123, 255, 4, 0, 255, 255, 255, 255, 191});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 4, 4, 0, 255, 255, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                sendData(new int[]{125, 1, 1, 0, 255, 255, 255, 255, 223});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIGHT) || str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, 0, 255, 255, 255, 255, 239});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                sendData(new int[]{122, 1, 0, 255, 255, 255, 255, 255, 175});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 1, 0, 255, 255, 255, 255, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendsetting(int i, int i2, int i3, int i4) {
+        try {
+            Thread.sleep(50L);
+            sendData(new int[]{125, 1, 3, i, i2, i3, i4, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendTime(int i, int i2, int i3, int i4, int i5, int i6, int i7, String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                sendData(new int[]{142, i, i2, i3, i4, i5, i6, i7, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{139, i, i2, i3, i4, i5, i6, i7, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 5, i, i2, i3, i4, i5, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void endTime(int i, int i2, int i3, int i4, String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 17, i, i2, 255, i3, i4, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 255, 16, i, i2, 255, i3, i4, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 6, i2, i, i3, i4, 255, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setrgbTime(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            sendData(new int[]{125, 255, i, i2, i3, i4, i5, i6, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void closeTime(String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                sendData(new int[]{142, 255, 255, 255, 255, 255, 255, 255, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{139, 255, 255, 255, 255, 255, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                sendData(new int[]{122, 11, 255, 255, 255, 255, 255, 255, 175});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 7, 255, 255, 255, 255, 255, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setRgb(int i, int i2, int i3, String str, boolean z, boolean z2, boolean z3, boolean z4, boolean z5) {
+        try {
+            int i4 = 1;
+            if (!str.contains(CommonConstant.LEDBLE) && !str.equalsIgnoreCase("LEDCAR-00-")) {
+                if (str.equalsIgnoreCase("LEDDMX-03-")) {
+                    sendData(new int[]{123, 255, 7, i, i2, i3, 255, 255, 191});
+                    return;
+                }
+                if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                    int[] iArr = null;
+                    if (!z2 && !z3) {
+                        iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 3, i, i2, i3, 255, 239};
+                    } else if (z3) {
+                        iArr = new int[9];
+                        iArr[0] = 123;
+                        iArr[1] = 1;
+                        iArr[2] = 7;
+                        iArr[3] = i;
+                        iArr[4] = i2;
+                        iArr[5] = i3;
+                        if (!z) {
+                            i4 = 0;
+                        }
+                        iArr[6] = i4;
+                        iArr[7] = 255;
+                        iArr[8] = 191;
+                    } else if (z2) {
+                        iArr = new int[]{123, 0, 7, i, i2, i3, 0, 255, 191};
+                    }
+                    sendData(iArr);
+                    return;
+                }
+                if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                    sendData(new int[]{125, 2, 1, 255, i, i2, i3, 255, 223});
+                    return;
+                }
+                if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                    int[] iArr2 = new int[9];
+                    iArr2[0] = 126;
+                    iArr2[1] = 255;
+                    iArr2[2] = 5;
+                    iArr2[3] = 3;
+                    iArr2[4] = i;
+                    iArr2[5] = i2;
+                    iArr2[6] = i3;
+                    if (!z4) {
+                        i4 = 255;
+                    }
+                    iArr2[7] = i4;
+                    iArr2[8] = 239;
+                    sendData(iArr2);
+                    return;
+                }
+                return;
+            }
+            if (this.handlerrgb == null) {
+                this.handlerrgb = new Handler();
+            }
+            if (this.aa) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 3, i, i2, i3, 255, 239});
+                this.aa = false;
+                this.handlerrgb.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.1
+                    @Override // java.lang.Runnable
+                    public void run() {
+                        NetConnectBle.this.aa = true;
+                    }
+                }, 50L);
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoResetGroup() {
+        try {
+            sendData(new int[]{114, 20, 255, 255, 255, 255, 255, 255, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoDelectGroup(int i) {
+        try {
+            sendData(new int[]{114, 17, i, 255, 255, 255, 255, 255, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoAddGroup(int i, int i2, int i3) {
+        try {
+            sendData(new int[]{114, 16, i, i2, 255, 255, 255, i3, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoLightOnOff(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{114, 1, i, i2, 255, i3, i4, i5, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoHsi(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            sendData(new int[]{114, 3, i, i2, i3, i4, i5, i6, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoRgb(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            sendData(new int[]{114, 4, i, i2, i3, i4, i5, i6, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoBrightNess(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{114, 2, i, i2, 255, i3, i4, i5, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoCT(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{114, 5, i, 255, 255, i2, i3, i4, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoCTCorrection(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{114, 6, i, i2, 255, i3, i4, i5, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhocoloredPaper(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{114, 7, i, 255, 255, i2, i3, i4, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoEffect(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{114, 8, i, 255, 255, i2, i3, i4, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoEffectSpeed(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{114, 9, i, 255, 255, i2, i3, i4, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setPhoAisle(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{114, 10, i, i2, 255, i3, i4, i5, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBleRgb(int i, int i2, int i3) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 3, i, i2, i3, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02Rgb(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 3, i, i2, i3, i4, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDmxRgb(int i, int i2, int i3, int i4, String str) {
+        try {
+            sendData(str.equalsIgnoreCase("LEDCAR-01-") ? new int[]{123, 0, 7, i, i2, i3, i4, 255, 191} : new int[]{123, 255, 7, i, i2, i3, i4, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setStageRgb(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 3, i, i2, i3, i4, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBleCustomRgb(int i, int i2, int i3, int i4, int i5, int i6, String str) {
+        try {
+            sendData(str.equalsIgnoreCase(CommonConstant.LEDBLE_02) ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, i6, 19, i4, i, i2, i3, i5, 239} : new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 19, i4, i, i2, i3, i5, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDmxCustom(int i, int i2, int i3, int i4, int i5, String str) {
+        int[] iArr;
+        try {
+            if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                iArr = new int[]{123, 0, 7, i, i2, i3, i4, i5, 191};
+            } else {
+                iArr = i4 == 2 ? new int[]{123, 255, 7, 0, 0, 0, i4, i5, 191} : new int[]{123, 255, 7, i, i2, i3, i4, i5, 191};
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCar01Rgb(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{123, i4, 7, i, i2, i3, i5, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setRgbMode(int i, String str, boolean z) {
+        int[] iArr = null;
+        try {
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase("LEDCAR-00-") || (str.equalsIgnoreCase("LEDCAR-01-") && !z)) {
+                iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 3, i, 3, 255, 255, 255, 239};
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                iArr = new int[]{123, 255, 3, i, 255, 255, 255, 255, 191};
+            } else if (str.equalsIgnoreCase("LEDCAR-01-") && z) {
+                iArr = new int[]{123, 255, 3, i, 255, 255, 255, 255, 191};
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                iArr = new int[]{125, 2, 5, i, 255, 255, 255, 255, 223};
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 3, i, 3, 255, 255, 255, 239};
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                iArr = new int[]{122, 6, i, 255, 255, 255, 255, 255, 175};
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                iArr = new int[]{112, 255, i, 255, 255, 255, 255, 255, 15};
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02RgbMode(int i, int i2) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 3, i, 3, 255, 255, i2, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDirection(int i, String str, boolean z) {
+        try {
+            if ((!str.equalsIgnoreCase("LEDCAR-01-") || !z) && str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 255, 13, i, 255, 255, 255, 255, 191});
+            } else {
+                sendData(new int[]{123, 255, 13, i, 255, 255, 255, 255, 191});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setMusicMicroMode(String str, int i) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase("LEDCAR-00-")) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 2, 14, i, 255, 255, 255, 255, 239});
+            } else if (str.contains(CommonConstant.LEDDMX) || str.equalsIgnoreCase("LEDCAR-01-")) {
+                sendData(new int[]{123, 255, 11, i, 1, 255, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 4, i, 0, 255, 255, 255, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setVoiceCtlMode(String str, int i, int i2) {
+        try {
+            if (!str.contains(CommonConstant.LEDBLE) && !str.equalsIgnoreCase("LEDCAR-00-")) {
+                if (str.contains(CommonConstant.LEDDMX)) {
+                    sendData(new int[]{123, 255, 11, i, 0, 255, 255, 255, 191});
+                    return;
+                } else {
+                    if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                        sendData(new int[]{112, 255, i, 1, 255, 255, 255, 255, 15});
+                        return;
+                    }
+                    return;
+                }
+            }
+            sendData(str.contains(CommonConstant.LEDBLE_02) ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, 0, 14, i, 255, 255, 255, i2, 239} : new int[]{WebSocketProtocol.PAYLOAD_SHORT, 0, 14, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCar01VoiceCtlMode(boolean z, int i) {
+        try {
+            sendData(z ? new int[]{WebSocketProtocol.PAYLOAD_SHORT, 0, 14, i, 255, 255, 255, 255, 239} : new int[]{123, 255, 11, i, 0, 255, 255, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSpeed(int i, String str, boolean z, boolean z2) {
+        try {
+            int i2 = 1;
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase("LEDCAR-00-") || (str.equalsIgnoreCase("LEDCAR-01-") && !z2)) {
+                int[] iArr = new int[9];
+                iArr[0] = 126;
+                iArr[1] = 255;
+                iArr[2] = 2;
+                iArr[3] = i;
+                if (!z) {
+                    i2 = 0;
+                }
+                iArr[4] = i2;
+                iArr[5] = 255;
+                iArr[6] = 255;
+                iArr[7] = 255;
+                iArr[8] = 239;
+                sendData(iArr);
+            } else if (str.equalsIgnoreCase("LEDDMX-01-")) {
+                int[] iArr2 = new int[9];
+                iArr2[0] = 123;
+                iArr2[1] = 255;
+                iArr2[2] = 2;
+                iArr2[3] = i;
+                iArr2[4] = 255;
+                if (!z) {
+                    i2 = 0;
+                }
+                iArr2[5] = i2;
+                iArr2[6] = 255;
+                iArr2[7] = 255;
+                iArr2[8] = 191;
+                sendData(iArr2);
+            } else if (str.equalsIgnoreCase("LEDDMX-00-") || str.equalsIgnoreCase("LEDDMX-02-") || str.equalsIgnoreCase("LEDDMX-03-") || str.equalsIgnoreCase(CommonConstant.LEDDMX_04) || str.equalsIgnoreCase("LEDCAR-01-")) {
+                sendData(new int[]{123, 255, 2, i, 255, 0, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                sendData(new int[]{125, 2, 4, i, 255, 255, 255, 255, 223});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 2, i, 255, 255, 255, 255, 239});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                sendData(new int[]{122, 3, i, 255, 255, 255, 255, 255, 175});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                sendData(new int[]{112, 3, i, 255, 255, 255, 255, 255, 15});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDiy(final ArrayList<MyColor> arrayList, final int i, final String str) {
+        try {
+            this.k = 0;
+            final Handler handler = new Handler();
+            handler.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.2
+                @Override // java.lang.Runnable
+                public void run() {
+                    if (NetConnectBle.this.k != arrayList.size()) {
+                        int i2 = ((MyColor) arrayList.get(NetConnectBle.this.k)).r;
+                        int i3 = ((MyColor) arrayList.get(NetConnectBle.this.k)).g;
+                        int i4 = ((MyColor) arrayList.get(NetConnectBle.this.k)).b;
+                        if (str.equalsIgnoreCase("LEDDMX-01-")) {
+                            if (str.equalsIgnoreCase("LEDDMX-01-")) {
+                                try {
+                                    NetConnectBle.this.sendData(new int[]{123, 255, 14, i, i2, i3, i4, arrayList.size(), 191});
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                            try {
+                                NetConnectBle.this.sendData(new int[]{125, 2, 3, i, i2, i3, i4, arrayList.size(), 223});
+                            } catch (IOException e2) {
+                                e2.printStackTrace();
+                            }
+                        } else if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                            try {
+                                NetConnectBle.this.sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 6, i, i2, i3, i4, arrayList.size(), 239});
+                            } catch (IOException e3) {
+                                e3.printStackTrace();
+                            }
+                        }
+                        NetConnectBle.access$008(NetConnectBle.this);
+                        handler.postDelayed(this, 100L);
+                        return;
+                    }
+                    handler.removeCallbacks(this);
+                    NetConnectBle.this.k = 0;
+                }
+            }, 10L);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setMusicBrightness(int i, String str) {
+        int i2 = i;
+        if (i2 > 100) {
+            i2 = 100;
+        } else if (i2 <= 0) {
+            i2 = 0;
+        }
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 1, i2, 1, 255, 255, 255, 239});
+                return;
+            }
+            if (str.equalsIgnoreCase("LEDCAR-00-")) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 1, i2, 1, 255, 255, 255, 239});
+                return;
+            }
+            if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                sendData(new int[]{123, 255, 1, (i2 * 32) / 100, i2, 1, 255, 255, 191});
+                return;
+            }
+            if (!str.equalsIgnoreCase("LEDDMX-00-") && !str.equalsIgnoreCase("LEDDMX-01-") && !str.equalsIgnoreCase("LEDDMX-02-") && !str.equalsIgnoreCase("LEDDMX-03-")) {
+                if (str.equalsIgnoreCase(CommonConstant.LEDDMX_04)) {
+                    sendData(new int[]{123, 255, 1, 255, i2, 1, 255, 255, 191});
+                    return;
+                } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                    sendData(new int[]{122, 9, i2, 255, 255, 255, 255, 0, 175});
+                    return;
+                } else {
+                    if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                        sendData(new int[]{112, 2, i2, 255, 255, 255, 255, 255, 15});
+                        return;
+                    }
+                    return;
+                }
+            }
+            sendData(new int[]{123, 255, 1, (i2 * 32) / 100, i2, 1, 255, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBrightness(int i, String str, boolean z, boolean z2, boolean z3) {
+        int[] iArr;
+        int[] iArr2;
+        int i2 = i;
+        int i3 = 0;
+        if (i2 > 100) {
+            i2 = 100;
+        } else if (i2 <= 0) {
+            i2 = 0;
+        }
+        try {
+            int i4 = 1;
+            if (!str.contains(CommonConstant.LEDBLE) && !str.equalsIgnoreCase("LEDCAR-00-")) {
+                if (str.contains(CommonConstant.LEDDMX)) {
+                    if (this.handler == null) {
+                        this.handler = new Handler();
+                    }
+                    if (this.aa) {
+                        if (str.equalsIgnoreCase(CommonConstant.LEDDMX_04)) {
+                            iArr2 = new int[]{123, 255, 1, 255, i2, 0, 255, 255, 191};
+                        } else {
+                            iArr2 = new int[9];
+                            iArr2[0] = 123;
+                            iArr2[1] = 255;
+                            iArr2[2] = 1;
+                            iArr2[3] = (i2 * 32) / 100;
+                            iArr2[4] = i2;
+                            if (!z) {
+                                i4 = 0;
+                            }
+                            iArr2[5] = i4;
+                            iArr2[6] = 255;
+                            iArr2[7] = 255;
+                            iArr2[8] = 191;
+                        }
+                        sendData(iArr2);
+                        this.aa = false;
+                        this.handler.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.4
+                            @Override // java.lang.Runnable
+                            public void run() {
+                                NetConnectBle.this.aa = true;
+                            }
+                        }, 30L);
+                        return;
+                    }
+                    return;
+                }
+                if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                    if (z2 || z3) {
+                        iArr = new int[9];
+                        iArr[0] = 123;
+                        iArr[1] = 255;
+                        iArr[2] = 1;
+                        iArr[3] = (i2 * 32) / 100;
+                        iArr[4] = i2;
+                        if (z) {
+                            i3 = 1;
+                        } else if (z2) {
+                            i3 = 2;
+                        }
+                        iArr[5] = i3;
+                        iArr[6] = 255;
+                        iArr[7] = 255;
+                        iArr[8] = 191;
+                    } else {
+                        iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 1, i2, 0, 255, 255, 255, 239};
+                    }
+                    sendData(iArr);
+                    return;
+                }
+                if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                    sendData(new int[]{125, 2, 2, i2, 255, 255, 255, 255, 223});
+                    return;
+                }
+                if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                    sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 1, i2, 255, 255, 255, 255, 239});
+                    return;
+                } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                    sendData(new int[]{122, 2, i2, 255, 255, 255, 255, 255, 175});
+                    return;
+                } else {
+                    if (str.equalsIgnoreCase(CommonConstant.LEDLIKE)) {
+                        sendData(new int[]{112, 2, i2, 255, 255, 255, 255, 255, 15});
+                        return;
+                    }
+                    return;
+                }
+            }
+            if (this.handler == null) {
+                this.handler = new Handler();
+            }
+            if (this.aa) {
+                int[] iArr3 = new int[9];
+                iArr3[0] = 126;
+                iArr3[1] = 255;
+                iArr3[2] = 1;
+                iArr3[3] = i2;
+                if (!z) {
+                    i4 = 0;
+                }
+                iArr3[4] = i4;
+                iArr3[5] = 255;
+                iArr3[6] = 255;
+                iArr3[7] = 255;
+                iArr3[8] = 239;
+                sendData(iArr3);
+                this.aa = false;
+                this.handler.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.3
+                    @Override // java.lang.Runnable
+                    public void run() {
+                        NetConnectBle.this.aa = true;
+                    }
+                }, 30L);
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCtBrightness(String str, int i) {
+        try {
+            int[] iArr = (!str.equalsIgnoreCase(CommonConstant.LEDBLE_03) && str.equalsIgnoreCase(CommonConstant.LEDDMX_04)) ? new int[]{123, 255, 1, 255, i, 2, 255, 255, 191} : new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 1, i, 2, 255, 255, 255, 15};
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setLikeBrightness(int i, boolean z, boolean z2) {
+        int i2 = i;
+        if (i2 > 100) {
+            i2 = 100;
+        } else if (i2 <= 0) {
+            i2 = 0;
+        }
+        try {
+            sendData(z ? new int[]{112, 2, i2, 1, 255, 255, 255, 255, 15} : z2 ? new int[]{112, 2, i2, 2, 255, 255, 255, 255, 15} : new int[]{112, 2, i2, 0, 255, 255, 255, 255, 15});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDim(int i, String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase("LEDCAR-00-")) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 1, i, 255, 255, 255, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 255, 9, (i * 32) / 100, i, 255, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                sendData(new int[]{125, 2, 7, i, 255, 255, 255, 255, 223});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 1, i, 255, 255, 255, 239});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setColorWarm(int i, int i2, String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE)) {
+                if (str.equalsIgnoreCase(CommonConstant.LEDBLE_03)) {
+                    sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 2, i2, 255, 255, 255, 239});
+                } else {
+                    sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 2, i, i2, 255, 255, 239});
+                }
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDDMX_04)) {
+                sendData(new int[]{123, 255, 21, 255, i2, 255, 255, 255, 239});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 2, i, i2, 255, 255, 239});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSUN)) {
+                sendData(new int[]{122, 5, i, 255, 255, 255, 255, 255, 175});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDynamicModel(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 3, i, 4, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSensitivity(int i, boolean z, boolean z2, String str) {
+        int[] iArr = null;
+        try {
+            int i2 = 1;
+            if (str.contains(CommonConstant.LEDBLE)) {
+                iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 7, i, 255, 255, 255, 255, 239};
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                iArr = new int[9];
+                iArr[0] = 123;
+                iArr[1] = 255;
+                iArr[2] = 12;
+                iArr[3] = i;
+                if (!z) {
+                    i2 = 0;
+                }
+                iArr[4] = i2;
+                iArr[5] = 255;
+                iArr[6] = 255;
+                iArr[7] = 255;
+                iArr[8] = 191;
+            } else if (str.equalsIgnoreCase("LEDCAR-00-")) {
+                iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 7, i, 255, 255, 255, 255, 239};
+            } else if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                if (z2) {
+                    iArr = new int[9];
+                    iArr[0] = 123;
+                    iArr[1] = 255;
+                    iArr[2] = 12;
+                    iArr[3] = i;
+                    if (!z) {
+                        i2 = 0;
+                    }
+                    iArr[4] = i2;
+                    iArr[5] = 255;
+                    iArr[6] = 255;
+                    iArr[7] = 255;
+                    iArr[8] = 191;
+                } else {
+                    iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 7, i, 255, 255, 255, 255, 239};
+                }
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setLikeSensitivity(int i) {
+        try {
+            sendData(new int[]{112, 8, i, 255, 255, 255, 255, 255, 15});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDynamicDiy(final ArrayList<MyColor> arrayList, final int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 10, i, 3, 255, 255, 255, 239});
+            final Handler handler = new Handler();
+            handler.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.5
+                @Override // java.lang.Runnable
+                public void run() {
+                    if (NetConnectBle.this.idx >= arrayList.size()) {
+                        NetConnectBle.this.idx = 0;
+                        try {
+                            NetConnectBle.this.sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 12, i, 3, 255, 255, 255, 239});
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                        handler.removeCallbacks(this);
+                        return;
+                    }
+                    int i2 = ((MyColor) arrayList.get(NetConnectBle.this.idx)).r;
+                    int i3 = ((MyColor) arrayList.get(NetConnectBle.this.idx)).g;
+                    int i4 = ((MyColor) arrayList.get(NetConnectBle.this.idx)).b;
+                    LogUtil.i(LedBleApplication.tag, "r:" + i2 + " g:" + i3 + " b:" + i4);
+                    try {
+                        NetConnectBle.this.sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 11, i, i2, i3, i4, arrayList.size(), 239});
+                    } catch (IOException e2) {
+                        e2.printStackTrace();
+                    }
+                    NetConnectBle.this.idx++;
+                    handler.postDelayed(this, 300L);
+                }
+            }, 300L);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendtimestage(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            int[] iArr = {WebSocketProtocol.PAYLOAD_SHORT, i, 8, i2, i3, i4, i5, i6, 239};
+            Thread.sleep(200L);
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendSun(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{122, 10, i, i2, i3, i4, i5, 255, 175});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void timeSun(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{122, 12, i, i2, i3, i4, 255, 255, 175});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSPIModel(int i, String str) {
+        int[] iArr = null;
+        try {
+            if (str.contains(CommonConstant.LEDDMX) || str.equalsIgnoreCase("LEDCAR-01-")) {
+                iArr = new int[]{123, 255, 3, i, 255, 255, 255, 255, 191};
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setConfigSPI(int i, byte b, byte b2, int i2, String str) {
+        int[] iArr;
+        try {
+            if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                iArr = new int[]{123, 255, 5, 4, b, b2, i2, 255, 191};
+            } else {
+                iArr = (str.equalsIgnoreCase("LEDDMX-00-") || str.equalsIgnoreCase("LEDDMX-03-")) ? new int[]{123, 255, 5, i, b, b2, i2, 255, 191} : new int[]{123, 255, 5, i, b, b2, i2, 255, 191};
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setConfigCAR01(int i, int i2, int i3, int i4, String str) {
+        try {
+            sendData(str.equalsIgnoreCase("LEDCAR-01-") ? new int[]{123, i, 5, 5, i2, i3, i4, 255, 191} : null);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void pauseSPI(int i, String str) {
+        try {
+            sendData(str.equalsIgnoreCase("LEDDMX-01-") ? new int[]{123, 255, 6, i, 255, 255, 255, 255, 191} : new int[]{123, 255, 6, i, 255, 255, 255, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void SetRgbSort(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 8, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void SetPairCode(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 9, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void SetCHN(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, i, 11, i2, i3, i4, i5, i6, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setTime(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            sendData(new int[]{125, 3, i, i2, i3, i4, i5, i6, 223});
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void setTimerSecData(int[] iArr) {
+        try {
+            Thread.sleep(200L);
+            sendData(new int[]{124, iArr[0], iArr[1], iArr[2], iArr[3], iArr[4], iArr[5], iArr[6], iArr[7]});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void configCode(int i, int i2, int i3) {
+        try {
+            sendData(new int[]{123, 255, 10, i, i2, i3, 255, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setAuxiliary(int i, String str) {
+        try {
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase("LEDCAR-00-") || str.equalsIgnoreCase("LEDCAR-01-")) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 18, i, 255, 255, 255, 255, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 255, 17, i, 255, 255, 255, 255, 191});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDmx0001Subarea(int i, String str) {
+        try {
+            sendData(new int[]{123, 255, 20, i, 255, 255, 255, 255, 191});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setModeCycle(int i, int i2, int i3, int i4, int i5, int i6, String str, boolean z) {
+        try {
+            if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, i, 18, i2, i3, i4, i5, i6, 191});
+            } else if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase(CommonConstant.LEDSTAGE) || str.equalsIgnoreCase("LEDCAR-00-") || (str.equalsIgnoreCase("LEDCAR-01-") && !z)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, i, 15, 1, i2, i3, i4, i5, 239});
+            } else if (str.equalsIgnoreCase("LEDCAR-01-") && z) {
+                sendData(new int[]{123, i, 18, i2, i3, i4, i5, i6, 191});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCustomCycle(String str, boolean z) {
+        try {
+            if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 255, 15, 1, 255, 255, 255, 255, 191});
+            } else if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase(CommonConstant.LEDSTAGE) || str.equalsIgnoreCase(CommonConstant.LEDLIGHT) || str.equalsIgnoreCase("LEDCAR-00-") || (str.equalsIgnoreCase("LEDCAR-01-") && !z)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 15, 0, 255, 255, 255, 255, 239});
+            } else if (str.equalsIgnoreCase("LEDCAR-01-") && z) {
+                sendData(new int[]{123, 255, 15, 1, 255, 255, 255, 255, 191});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setChangeColor(final boolean z, final boolean z2, final boolean z3, final ArrayList<MyColor> arrayList, final ArrayList<Integer> arrayList2, final String str) {
+        try {
+            this.k = 0;
+            final Handler handler = new Handler();
+            handler.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.6
+                @Override // java.lang.Runnable
+                public void run() {
+                    int[] iArr;
+                    if (arrayList == null) {
+                        return;
+                    }
+                    if (NetConnectBle.this.k != arrayList.size()) {
+                        if (NetConnectBle.this.k < arrayList.size()) {
+                            int i = ((MyColor) arrayList.get(NetConnectBle.this.k)).r;
+                            int i2 = ((MyColor) arrayList.get(NetConnectBle.this.k)).g;
+                            int i3 = ((MyColor) arrayList.get(NetConnectBle.this.k)).b;
+                            int iIntValue = ((Integer) arrayList2.get(NetConnectBle.this.k)).intValue();
+                            int i4 = 252;
+                            if (str.contains(CommonConstant.LEDBLE)) {
+                                iArr = new int[9];
+                                iArr[0] = 126;
+                                iArr[1] = iIntValue;
+                                iArr[2] = 13;
+                                if (z) {
+                                    i4 = 254;
+                                } else if (!z2) {
+                                    i4 = 253;
+                                }
+                                iArr[3] = i4;
+                                iArr[4] = i;
+                                iArr[5] = i2;
+                                iArr[6] = i3;
+                                iArr[7] = arrayList.size();
+                                iArr[8] = 239;
+                            } else if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE) || str.equalsIgnoreCase(CommonConstant.LEDLIGHT) || str.equalsIgnoreCase("LEDCAR-00-") || (str.equalsIgnoreCase("LEDCAR-01-") && !z3)) {
+                                iArr = new int[9];
+                                iArr[0] = 126;
+                                iArr[1] = iIntValue;
+                                iArr[2] = 13;
+                                if (z) {
+                                    i4 = 254;
+                                } else if (!z2) {
+                                    i4 = 253;
+                                }
+                                iArr[3] = i4;
+                                iArr[4] = i;
+                                iArr[5] = i2;
+                                iArr[6] = i3;
+                                iArr[7] = arrayList.size();
+                                iArr[8] = 239;
+                            } else if (str.equalsIgnoreCase("LEDCAR-01-") && z3) {
+                                iArr = new int[9];
+                                iArr[0] = 123;
+                                iArr[1] = iIntValue;
+                                iArr[2] = 14;
+                                if (z) {
+                                    i4 = 254;
+                                } else if (!z2) {
+                                    i4 = 253;
+                                }
+                                iArr[3] = i4;
+                                iArr[4] = i;
+                                iArr[5] = i2;
+                                iArr[6] = i3;
+                                iArr[7] = arrayList.size();
+                                iArr[8] = 191;
+                            } else {
+                                iArr = null;
+                            }
+                            try {
+                                NetConnectBle.this.sendData(iArr);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                        NetConnectBle.access$008(NetConnectBle.this);
+                        handler.postDelayed(this, 100L);
+                        return;
+                    }
+                    handler.removeCallbacks(this);
+                    NetConnectBle.this.k = 0;
+                }
+            }, 10L);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setDmx00Dmx01ChangeColor(final boolean z, final ArrayList<MyColor> arrayList, final ArrayList<Integer> arrayList2) {
+        try {
+            this.k = 0;
+            final Handler handler = new Handler();
+            handler.postDelayed(new Runnable() { // from class: com.home.net.NetConnectBle.7
+                @Override // java.lang.Runnable
+                public void run() {
+                    if (arrayList != null && NetConnectBle.this.k < arrayList.size()) {
+                        if (NetConnectBle.this.k != arrayList.size()) {
+                            int i = ((MyColor) arrayList.get(NetConnectBle.this.k)).r;
+                            int i2 = ((MyColor) arrayList.get(NetConnectBle.this.k)).g;
+                            int i3 = ((MyColor) arrayList.get(NetConnectBle.this.k)).b;
+                            int iIntValue = ((Integer) arrayList2.get(NetConnectBle.this.k)).intValue();
+                            int[] iArr = new int[9];
+                            iArr[0] = 123;
+                            iArr[1] = iIntValue;
+                            iArr[2] = 14;
+                            iArr[3] = z ? 254 : 253;
+                            iArr[4] = i;
+                            iArr[5] = i2;
+                            iArr[6] = i3;
+                            iArr[7] = arrayList.size();
+                            iArr[8] = 191;
+                            try {
+                                NetConnectBle.this.sendData(iArr);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                            NetConnectBle.access$008(NetConnectBle.this);
+                            handler.postDelayed(this, 100L);
+                            return;
+                        }
+                        handler.removeCallbacks(this);
+                        NetConnectBle.this.k = 0;
+                    }
+                }
+            }, 10L);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setMode(boolean z, boolean z2, boolean z3, int i, String str) {
+        int[] iArr = null;
+        try {
+            int i2 = 1;
+            int i3 = 0;
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase(CommonConstant.LEDSTAGE) || str.equalsIgnoreCase(CommonConstant.LEDLIGHT) || str.equalsIgnoreCase("LEDCAR-00-")) {
+                iArr = new int[9];
+                iArr[0] = 126;
+                if (z2) {
+                    i3 = 2;
+                } else if (!z) {
+                    i3 = 1;
+                }
+                iArr[1] = i3;
+                iArr[2] = 14;
+                iArr[3] = i;
+                iArr[4] = 255;
+                iArr[5] = 255;
+                iArr[6] = 255;
+                iArr[7] = 255;
+                iArr[8] = 239;
+            } else {
+                if (str.equalsIgnoreCase("LEDCAR-01-")) {
+                    if (z3) {
+                        iArr = new int[9];
+                        iArr[0] = 123;
+                        iArr[1] = 255;
+                        iArr[2] = z2 ? 11 : 19;
+                        iArr[3] = i;
+                        if (z) {
+                            i2 = 0;
+                        } else if (!z2) {
+                            i2 = 255;
+                        }
+                        iArr[4] = i2;
+                        iArr[5] = 255;
+                        iArr[6] = 255;
+                        iArr[7] = 255;
+                        iArr[8] = 191;
+                    } else {
+                        iArr = new int[9];
+                        iArr[0] = 126;
+                        if (!z) {
+                            i3 = 1;
+                        }
+                        iArr[1] = i3;
+                        iArr[2] = 14;
+                        iArr[3] = i;
+                        iArr[4] = 255;
+                        iArr[5] = 255;
+                        iArr[6] = 255;
+                        iArr[7] = 255;
+                        iArr[8] = 239;
+                    }
+                } else if (str.equalsIgnoreCase("LEDDMX-00-") || str.equalsIgnoreCase("LEDDMX-02-") || str.equalsIgnoreCase("LEDDMX-03-")) {
+                    iArr = new int[]{123, 255, 19, i, 255, 255, 255, 255, 191};
+                }
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02Mode(int i, int i2, int i3) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, i2, 14, i, 255, 255, 255, i3, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCustomMode(boolean z, boolean z2, int i, int i2, String str) {
+        int[] iArr;
+        int[] iArr2 = null;
+        try {
+            int i3 = 0;
+            if (str.contains(CommonConstant.LEDBLE) || str.equalsIgnoreCase(CommonConstant.LEDSTAGE) || str.equalsIgnoreCase(CommonConstant.LEDLIGHT) || str.equalsIgnoreCase("LEDCAR-00-") || str.equalsIgnoreCase("LEDCAR-01-")) {
+                if (str.equalsIgnoreCase(CommonConstant.LEDBLE_02)) {
+                    iArr = new int[9];
+                    iArr[0] = 126;
+                    if (z2) {
+                        i3 = 2;
+                    } else if (!z) {
+                        i3 = 1;
+                    }
+                    iArr[1] = i3;
+                    iArr[2] = 14;
+                    iArr[3] = i;
+                    iArr[4] = 255;
+                    iArr[5] = 255;
+                    iArr[6] = 255;
+                    iArr[7] = i2;
+                    iArr[8] = 239;
+                } else {
+                    iArr = new int[9];
+                    iArr[0] = 126;
+                    if (z2) {
+                        i3 = 2;
+                    } else if (!z) {
+                        i3 = 1;
+                    }
+                    iArr[1] = i3;
+                    iArr[2] = 14;
+                    iArr[3] = i;
+                    iArr[4] = 255;
+                    iArr[5] = 255;
+                    iArr[6] = 255;
+                    iArr[7] = 255;
+                    iArr[8] = 239;
+                }
+                iArr2 = iArr;
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                iArr2 = new int[]{123, 255, 19, i, 255, 255, 255, 255, 191};
+            }
+            sendData(iArr2);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCar01CustomMode(Boolean bool, int i) {
+        try {
+            sendData(bool.booleanValue() ? new int[]{123, 255, 19, i, 255, 255, 255, 255, 191} : new int[]{WebSocketProtocol.PAYLOAD_SHORT, 1, 14, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCar01CustomRgb(int i, int i2, int i3, Boolean bool, Boolean bool2) {
+        int[] iArr = null;
+        try {
+            if (!bool.booleanValue()) {
+                iArr = new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 5, 3, i, i2, i3, 255, 239};
+            } else if (bool.booleanValue()) {
+                iArr = new int[9];
+                iArr[0] = 123;
+                iArr[1] = 0;
+                iArr[2] = 7;
+                iArr[3] = i;
+                iArr[4] = i2;
+                iArr[5] = i3;
+                iArr[6] = bool2.booleanValue() ? 0 : 1;
+                iArr[7] = 255;
+                iArr[8] = 191;
+            }
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartRgb(int i, int i2, int i3) {
+        try {
+            sendData(new int[]{125, 2, 1, 255, i, i2, i3, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartCustomRgb(int i, int i2, int i3, int i4, int i5) {
+        try {
+            sendData(new int[]{125, 2, 8, i4, i, i2, i3, i5, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartTimerAddEdit(int i, int i2, int i3, int i4, int i5, int i6, int i7, int i8) {
+        try {
+            setSmartTimerAddEditDataToFFE1WithCallback(new int[]{112, i, i2, i3, i4, i5, i6, i7, i8});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartTimingCount(int i) {
+        try {
+            sendData(new int[]{125, 7, i, 255, 255, 255, 255, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartTimerPreview(int i, int i2, int i3, int i4, int i5, int i6) {
+        try {
+            sendData(new int[]{125, 4, i, i2, i3, i4, i5, i6, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartTimerAddEditDataToFFE1WithCallback(int[] iArr) {
+        BluetoothGatt value;
+        List<BluetoothGattDescriptor> descriptors;
+        try {
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            for (int i : iArr) {
+                byteArrayOutputStream.write(Tool.int2bytearray(i));
+            }
+            byte[] byteArray = byteArrayOutputStream.toByteArray();
+            HashMap<String, BluetoothGatt> bleGattMap = LedBleApplication.getApp().getBleGattMap();
+            if (bleGattMap == null || bleGattMap.isEmpty()) {
+                return;
+            }
+            if (!ListUtiles.isEmpty(this.groupDevices) || StringUtils.isEmpty(this.groupName)) {
+                Iterator<Map.Entry<String, BluetoothGatt>> it = bleGattMap.entrySet().iterator();
+                while (it.hasNext()) {
+                    try {
+                        value = it.next().getValue();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                    if (value != null) {
+                        BluetoothGattCharacteristic characteristic = value.getService(UUID.fromString(CommonConstant.FFE0)).getCharacteristic(UUID.fromString(CommonConstant.FFE1));
+                        if (characteristic != null) {
+                            characteristic.setValue(byteArray);
+                            value.writeCharacteristic(characteristic);
+                            if (!value.setCharacteristicNotification(characteristic, true) || (descriptors = characteristic.getDescriptors()) == null || descriptors.size() <= 0) {
+                                return;
+                            }
+                            for (BluetoothGattDescriptor bluetoothGattDescriptor : descriptors) {
+                                bluetoothGattDescriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                                value.writeDescriptor(bluetoothGattDescriptor);
+                            }
+                            return;
+                        }
+                        return;
+                    }
+                    continue;
+                }
+            }
+        } catch (IOException e2) {
+            e2.printStackTrace();
+        }
+    }
+
+    public void setSmartTimerDelete(int i, int i2) {
+        try {
+            sendData(new int[]{125, 6, i, i2, 255, 255, 255, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartTimerReset() {
+        try {
+            sendData(new int[]{125, 5, 255, 255, 255, 255, 255, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartBrightness(int i, int i2, String str) {
+        try {
+            if (str.equalsIgnoreCase(CommonConstant.LEDSTAGE)) {
+                sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 7, i, i2, 255, 255, 255, 239});
+            } else if (str.contains(CommonConstant.LEDDMX)) {
+                sendData(new int[]{123, 255, 8, i2, (i * 32) / 100, i, 255, 255, 191});
+            } else if (str.equalsIgnoreCase(CommonConstant.LEDSMART)) {
+                sendData(new int[]{125, 1, 2, i, i2, 255, 255, 255, 223});
+            }
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartTimeSet(int i, int i2, int i3, int i4) {
+        try {
+            sendData(new int[]{125, 1, 3, i, i2, i3, i4, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartCheck(int i) {
+        try {
+            sendSmartDataToFFE1WithCallback(new int[]{125, 1, 5, i, 255, 255, 255, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSmartBubbleCheck(int i) {
+        try {
+            sendData(new int[]{125, 1, 6, i, 255, 255, 255, 255, 223});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendSmartDataToFFE1WithCallback(int[] iArr) {
+        BluetoothGatt value;
+        List<BluetoothGattDescriptor> descriptors;
+        try {
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            for (int i : iArr) {
+                byteArrayOutputStream.write(Tool.int2bytearray(i));
+            }
+            byte[] byteArray = byteArrayOutputStream.toByteArray();
+            HashMap<String, BluetoothGatt> bleGattMap = LedBleApplication.getApp().getBleGattMap();
+            if (bleGattMap == null || bleGattMap.isEmpty()) {
+                return;
+            }
+            if (!ListUtiles.isEmpty(this.groupDevices) || StringUtils.isEmpty(this.groupName)) {
+                Iterator<Map.Entry<String, BluetoothGatt>> it = bleGattMap.entrySet().iterator();
+                while (it.hasNext()) {
+                    try {
+                        value = it.next().getValue();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                    if (value != null) {
+                        BluetoothGattCharacteristic characteristic = value.getService(UUID.fromString(CommonConstant.FFE0)).getCharacteristic(UUID.fromString(CommonConstant.FFE1));
+                        if (characteristic != null) {
+                            characteristic.setValue(byteArray);
+                            value.writeCharacteristic(characteristic);
+                            if (!value.setCharacteristicNotification(characteristic, true) || (descriptors = characteristic.getDescriptors()) == null || descriptors.size() <= 0) {
+                                return;
+                            }
+                            for (BluetoothGattDescriptor bluetoothGattDescriptor : descriptors) {
+                                bluetoothGattDescriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                                value.writeDescriptor(bluetoothGattDescriptor);
+                            }
+                            return;
+                        }
+                        return;
+                    }
+                    continue;
+                }
+            }
+        } catch (IOException e2) {
+            e2.printStackTrace();
+        }
+    }
+
+    public void setSunVcMode(int i) {
+        try {
+            sendData(new int[]{122, 7, i, 255, 255, 255, 255, 255, 175});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setSunSensitivity(int i) {
+        try {
+            sendData(new int[]{122, 8, i, 255, 255, 255, 255, 255, 175});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setLikeMode(int i, boolean z) {
+        try {
+            int[] iArr = new int[9];
+            iArr[0] = 112;
+            iArr[1] = 4;
+            iArr[2] = i;
+            iArr[3] = z ? 1 : 0;
+            iArr[4] = 255;
+            iArr[5] = 255;
+            iArr[6] = 255;
+            iArr[7] = 255;
+            iArr[8] = 15;
+            sendData(iArr);
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setCheck() {
+        try {
+            sendDataWithCallback(new int[]{114, 18, 0, 255, 255, 255, 255, 255, 47});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02RgbFixedColors(int i, int i2) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 20, i, 255, 255, 255, i2, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02Brightness(int i, int i2) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 1, i, 0, 255, 255, i2, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02Speed(int i, int i2) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 2, i, 0, 255, 255, i2, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setBle02CustomCycle(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 15, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setTwinkleMode(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 1, 21, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setTwinkleSpeed(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 1, 22, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setStarMode(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 0, 21, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setStarSpeed(int i) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 0, 22, i, 255, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void setTwinkleStarOnOff(int i, int i2) {
+        try {
+            sendData(new int[]{WebSocketProtocol.PAYLOAD_SHORT, 255, 4, i, i2, 255, 255, 255, 239});
+        } catch (Exception e) {
+            NetExceptionInterface netExceptionInterface = this.exceptionCallBack;
+            if (netExceptionInterface != null) {
+                netExceptionInterface.onException(e);
+            }
+        }
+    }
+
+    public void sendDataWithCallback(int[] iArr) {
+        try {
+            ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+            for (int i : iArr) {
+                byteArrayOutputStream.write(Tool.int2bytearray(i));
+            }
+            byte[] byteArray = byteArrayOutputStream.toByteArray();
+            HashMap<String, BluetoothGatt> bleGattMap = LedBleApplication.getApp().getBleGattMap();
+            if (bleGattMap == null || bleGattMap.isEmpty()) {
+                return;
+            }
+            if (!ListUtiles.isEmpty(this.groupDevices) || StringUtils.isEmpty(this.groupName)) {
+                Iterator<Map.Entry<String, BluetoothGatt>> it = bleGattMap.entrySet().iterator();
+                while (it.hasNext()) {
+                    try {
+                        BluetoothGatt value = it.next().getValue();
+                        BluetoothGattCharacteristic characteristic = value.getService(UUID.fromString(CommonConstant.FFE0)).getCharacteristic(UUID.fromString(CommonConstant.FFE1));
+                        if (characteristic != null) {
+                            characteristic.setValue(byteArray);
+                            value.writeCharacteristic(characteristic);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        } catch (IOException e2) {
+            e2.printStackTrace();
+        }
+    }
+
+    public void sendData(int[] iArr) throws IOException {
+        if (MainActivity_BLE.getMainActivity() != null) {
+            Utils.getInstance();
+            Utils.versionIdentificationTips(MainActivity_BLE.getMainActivity(), MainActivity_BLE.getSceneBean());
+        }
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        for (int i : iArr) {
+            byteArrayOutputStream.write(Tool.int2bytearray(i));
+        }
+        sendCharacteristic(byteArrayOutputStream.toByteArray());
+    }
+}
