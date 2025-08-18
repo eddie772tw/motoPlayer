@@ -52,44 +52,88 @@
                 <div id="speedGauge" class="echart-container"></div>
             </div>
 
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center justify-center"><h2 class="text-lg font-semibold text-gray-400 mb-2">檔位</h2><p id="gearDisplay" class="text-7xl font-black text-white">--</p></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">引擎水溫</h2><p class="text-4xl font-bold text-red-400"><span id="coolantTempDisplay">--</span> &deg;C</p></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">電瓶電壓</h2><p class="text-4xl font-bold text-yellow-400"><span id="voltageDisplay">--</span> V</p></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">系統狀態</h2><div class="flex items-center"><span id="unoStatusIndicator" class="h-4 w-4 rounded-full bg-gray-600 mr-2"></span><span id="unoStatusText" class="text-xl text-gray-400">未知</span></div></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">環境溫度</h2><p class="text-4xl font-bold text-blue-400"><span id="envTempDisplay">--</span> &deg;C</p></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">體感溫度</h2><p class="text-4xl font-bold text-purple-400"><span id="feelsLikeDisplay">--</span> &deg;C</p></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">環境濕度</h2><p class="text-4xl font-bold text-indigo-400"><span id="humidityDisplay">--</span> %</p></div>
-            <div class="bg-gray-800 p-4 rounded-xl shadow-lg"><h2 class="text-lg font-semibold text-gray-400 mb-2">光照強度</h2><p class="text-4xl font-bold text-amber-300"><span id="lightDisplay">--</span></p></div>
+            <!-- Data Cards -->
+            <div id="gear-card" class="bg-gray-800 p-4 rounded-xl shadow-lg flex-col items-center justify-center hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">檔位</h2><p id="gearDisplay" class="text-7xl font-black text-white">--</p></div>
+            <div id="coolant-temp-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">引擎水溫</h2><p class="text-4xl font-bold text-red-400"><span id="coolantTempDisplay">--</span> &deg;C</p></div>
+            <div id="voltage-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">電瓶電壓</h2><p class="text-4xl font-bold text-yellow-400"><span id="voltageDisplay">--</span> V</p></div>
+            <div id="uno-status-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">系統狀態</h2><div class="flex items-center"><span id="unoStatusIndicator" class="h-4 w-4 rounded-full bg-gray-600 mr-2"></span><span id="unoStatusText" class="text-xl text-gray-400">未知</span></div></div>
+            <div id="env-temp-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">環境溫度</h2><p class="text-4xl font-bold text-blue-400"><span id="envTempDisplay">--</span> &deg;C</p></div>
+            <div id="feels-like-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">體感溫度</h2><p class="text-4xl font-bold text-purple-400"><span id="feelsLikeDisplay">--</span> &deg;C</p></div>
+            <div id="humidity-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">環境濕度</h2><p class="text-4xl font-bold text-indigo-400"><span id="humidityDisplay">--</span> %</p></div>
+            <div id="light-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">光照強度</h2><p class="text-4xl font-bold text-amber-300"><span id="lightDisplay">--</span></p></div>
+
+            <!-- Performance / Tuning Data Cards (Initially Hidden) -->
+            <div id="throttle-pos-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">節氣門位置</h2><p class="text-4xl font-bold text-teal-400"><span id="throttlePosDisplay">--</span> %</p></div>
+            <div id="engine-load-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">引擎負荷</h2><p class="text-4xl font-bold text-orange-400"><span id="engineLoadDisplay">--</span> %</p></div>
+            <div id="timing-advance-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">點火提前角</h2><p class="text-4xl font-bold text-pink-400"><span id="timingAdvanceDisplay">--</span> &deg;</p></div>
+            <div id="intake-air-temp-card" class="bg-gray-800 p-4 rounded-xl shadow-lg hidden"><h2 class="text-lg font-semibold text-gray-400 mb-2">進氣溫度</h2><p class="text-4xl font-bold text-sky-400"><span id="intakeAirTempDisplay">--</span> &deg;C</p></div>
+
         </main>
     </div>
     <script>
-        // JavaScript 邏輯完全維持不變
-        const gearDisplay = document.getElementById('gearDisplay'), coolantTempDisplay = document.getElementById('coolantTempDisplay'), voltageDisplay = document.getElementById('voltageDisplay'), unoStatusIndicator = document.getElementById('unoStatusIndicator'), unoStatusText = document.getElementById('unoStatusText'), envTempDisplay = document.getElementById('envTempDisplay'), feelsLikeDisplay = document.getElementById('feelsLikeDisplay'), humidityDisplay = document.getElementById('humidityDisplay'), lightDisplay = document.getElementById('lightDisplay');
-        const wsStatusIndicator = document.getElementById('wsStatusIndicator'), wsStatusText = document.getElementById('wsStatusText');
         const rpmGauge = echarts.init(document.getElementById('rpmGauge'));
         const speedGauge = echarts.init(document.getElementById('speedGauge'));
-        const getRpmOption = (rpmValue) => ({
-            series: [{ type: 'gauge', center: ['50%', '60%'], startAngle: 200, endAngle: -20, min: 0, max: 12000, splitNumber: 12, itemStyle: { color: '#22D3EE' }, progress: { show: true, width: 20 }, pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 8, offsetCenter: [0, '-50%'] }, axisLine: { lineStyle: { width: 20, color: [[0.75, '#67e8f9'], [0.9, '#fde047'], [1, '#f87171']] } }, axisTick: { distance: -30, length: 8, lineStyle: { color: '#fff', width: 2 } }, splitLine: { distance: -35, length: 14, lineStyle: { color: '#fff', width: 3 } }, axisLabel: { distance: -10, color: '#fff', fontSize: 14, formatter: function (value) { return value / 1000 + 'k'; } }, anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5, borderColor: '#22D3EE' } }, title: { show: false }, detail: { valueAnimation: true, fontSize: 30, color: '#fff', offsetCenter: [0, '70%'], formatter: '{value}' }, data: [{ value: rpmValue }] }]
-        });
-        const getSpeedOption = (speedValue) => ({
-            series: [{ type: 'gauge', center: ['50%', '60%'], startAngle: 200, endAngle: -20, min: 0, max: 200, splitNumber: 10, itemStyle: { color: '#4ADE80' }, progress: { show: true, width: 20 }, pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 8, offsetCenter: [0, '-50%'] }, axisLine: { lineStyle: { width: 20, color: [[1, '#6EE7B7']] } }, axisTick: { distance: -30, length: 8, lineStyle: { color: '#fff', width: 2 } }, splitLine: { distance: -35, length: 14, lineStyle: { color: '#fff', width: 3 } }, axisLabel: { distance: -10, color: '#fff', fontSize: 14 }, anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5, borderColor: '#4ADE80' } }, title: { show: false }, detail: { valueAnimation: true, fontSize: 30, color: '#fff', offsetCenter: [0, '70%'], formatter: '{value} km/h' }, data: [{ value: speedValue }] }]
-        });
+
+        const getRpmOption = (rpmValue) => ({ series: [{ type: 'gauge', center: ['50%', '60%'], startAngle: 200, endAngle: -20, min: 0, max: 12000, splitNumber: 12, itemStyle: { color: '#22D3EE' }, progress: { show: true, width: 20 }, pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 8, offsetCenter: [0, '-50%'] }, axisLine: { lineStyle: { width: 20, color: [[0.75, '#67e8f9'], [0.9, '#fde047'], [1, '#f87171']] } }, axisTick: { distance: -30, length: 8, lineStyle: { color: '#fff', width: 2 } }, splitLine: { distance: -35, length: 14, lineStyle: { color: '#fff', width: 3 } }, axisLabel: { distance: -10, color: '#fff', fontSize: 14, formatter: function (value) { return value / 1000 + 'k'; } }, anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5, borderColor: '#22D3EE' } }, title: { show: false }, detail: { valueAnimation: true, fontSize: 30, color: '#fff', offsetCenter: [0, '70%'], formatter: '{value}' }, data: [{ value: rpmValue }] }] });
+        const getSpeedOption = (speedValue) => ({ series: [{ type: 'gauge', center: ['50%', '60%'], startAngle: 200, endAngle: -20, min: 0, max: 200, splitNumber: 10, itemStyle: { color: '#4ADE80' }, progress: { show: true, width: 20 }, pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 8, offsetCenter: [0, '-50%'] }, axisLine: { lineStyle: { width: 20, color: [[1, '#6EE7B7']] } }, axisTick: { distance: -30, length: 8, lineStyle: { color: '#fff', width: 2 } }, splitLine: { distance: -35, length: 14, lineStyle: { color: '#fff', width: 3 } }, axisLabel: { distance: -10, color: '#fff', fontSize: 14 }, anchor: { show: true, showAbove: true, size: 20, itemStyle: { borderWidth: 5, borderColor: '#4ADE80' } }, title: { show: false }, detail: { valueAnimation: true, fontSize: 30, color: '#fff', offsetCenter: [0, '70%'], formatter: '{value} km/h' }, data: [{ value: speedValue }] }] });
+
+        const wsStatusIndicator = document.getElementById('wsStatusIndicator'), wsStatusText = document.getElementById('wsStatusText');
+
+        // 建立一個 map，將數據的 key 映射到對應的 DOM 元素和其顯示樣式
+        const dataCardMap = {
+            // Core OBD
+            coolant_temp: { el: document.getElementById('coolant-temp-card'), display: 'block', valEl: document.getElementById('coolantTempDisplay'), fixed: 1 },
+            battery_voltage: { el: document.getElementById('voltage-card'), display: 'block', valEl: document.getElementById('voltageDisplay'), fixed: 2 },
+            // Extra OBD
+            gear: { el: document.getElementById('gear-card'), display: 'flex', valEl: document.getElementById('gearDisplay') },
+            throttle_pos: { el: document.getElementById('throttle-pos-card'), display: 'block', valEl: document.getElementById('throttlePosDisplay'), fixed: 1 },
+            engine_load: { el: document.getElementById('engine-load-card'), display: 'block', valEl: document.getElementById('engineLoadDisplay'), fixed: 1 },
+            timing_advance: { el: document.getElementById('timing-advance-card'), display: 'block', valEl: document.getElementById('timingAdvanceDisplay'), fixed: 1 },
+            intake_air_temp: { el: document.getElementById('intake-air-temp-card'), display: 'block', valEl: document.getElementById('intakeAirTempDisplay'), fixed: 1 },
+            // Environmental
+            temperature: { el: document.getElementById('env-temp-card'), display: 'block', valEl: document.getElementById('envTempDisplay'), fixed: 1 },
+            humidity: { el: document.getElementById('humidity-card'), display: 'block', valEl: document.getElementById('humidityDisplay'), fixed: 1 },
+            light_level: { el: document.getElementById('light-card'), display: 'block', valEl: document.getElementById('lightDisplay') },
+            feels_like: { el: document.getElementById('feels-like-card'), display: 'block', valEl: document.getElementById('feelsLikeDisplay'), fixed: 1 },
+            // System
+            uno_status: { el: document.getElementById('uno-status-card'), display: 'block' }
+        };
+
         const updateUI = (data) => {
+            // 更新儀表板
             rpmGauge.setOption(getRpmOption(data.rpm || 0));
             speedGauge.setOption(getSpeedOption(data.speed || 0));
-            gearDisplay.textContent = data.gear === 0 ? 'N' : (data.gear ?? '--');
-            coolantTempDisplay.textContent = data.coolant_temp?.toFixed(1) ?? '--';
-            voltageDisplay.textContent = data.battery_voltage?.toFixed(2) ?? '--';
-            envTempDisplay.textContent = data.temperature?.toFixed(1) ?? '--';
-            feelsLikeDisplay.textContent = data.feels_like?.toFixed(1) ?? '--';
-            humidityDisplay.textContent = data.humidity?.toFixed(1) ?? '--';
-            lightDisplay.textContent = data.light_level ?? '--';
-            if (data.uno_status === 'Online') {
-                unoStatusIndicator.className = 'h-4 w-4 rounded-full bg-green-500 mr-2';
-                unoStatusText.textContent = '連線正常'; unoStatusText.className = 'text-green-400';
-            } else {
-                unoStatusIndicator.className = 'h-4 w-4 rounded-full bg-red-500 mr-2';
-                unoStatusText.textContent = '連線中斷'; unoStatusText.className = 'text-red-400';
+
+            // 遍歷 map 來動態顯示/隱藏卡片並更新數值
+            for (const key in dataCardMap) {
+                const card = dataCardMap[key];
+                const value = data[key];
+
+                if (value !== null && value !== undefined) {
+                    card.el.style.display = card.display; // 顯示卡片
+                    if (card.valEl) { // 如果有數值元素
+                        let displayValue = value;
+                        if (key === 'gear') {
+                            displayValue = value === 0 ? 'N' : value;
+                        } else if (card.fixed !== undefined) {
+                            displayValue = value.toFixed(card.fixed);
+                        }
+                        card.valEl.textContent = displayValue;
+                    }
+                     if (key === 'uno_status') {
+                        const indicator = document.getElementById('unoStatusIndicator');
+                        const text = document.getElementById('unoStatusText');
+                        if (value === 'Online') {
+                            indicator.className = 'h-4 w-4 rounded-full bg-green-500 mr-2';
+                            text.textContent = '連線正常'; text.className = 'text-green-400';
+                        } else {
+                            indicator.className = 'h-4 w-4 rounded-full bg-red-500 mr-2';
+                            text.textContent = '連線中斷'; text.className = 'text-red-400';
+                        }
+                    }
+                } else {
+                    card.el.style.display = 'none'; // 隱藏卡片
+                }
             }
         };
         const socket = io();
