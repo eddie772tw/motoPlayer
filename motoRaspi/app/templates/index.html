@@ -6,9 +6,9 @@
     <title>MotoPlayer 即時儀表板 v3</title>
     <!-- [修正] 將 fonts.css 更正為 font.css -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/font.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+	<script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io@4.7.2/client-dist/socket.io.min.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .echart-container {
