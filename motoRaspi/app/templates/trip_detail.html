@@ -164,7 +164,7 @@
             const onZoomPan = ({ chart }) => syncCharts(chart);
 
             // --- 1. 動力圖表 ---
-            charts.powerChart = createLineChart(document.getElementById('powerChart').getContext('d'), {
+            charts.powerChart = createLineChart(document.getElementById('powerChart').getContext('2d'), {
                 datasets: [
                     { label: '時速 (km/h)', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp), y: d.speed})), borderColor: '#4ADE80', yAxisID: 'y' },
                     { label: '轉速 (RPM)', data: aggregatedTripData.map(d => ({x: new Date(d.timestamp), y: d.rpm})), borderColor: '#22D3EE', yAxisID: 'y1' },
