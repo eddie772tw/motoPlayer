@@ -212,8 +212,83 @@
             }, getChartOptions({ y: { beginAtZero: false, ticks: { color: '#9CA3AF' } } }, onZoomPan));
         };
         
-        const fetchTripData = async () => { /* ... (此函式維持不變) ... */ };
-        const aggregateDataByTime = (data, intervalSeconds = 1) => { /* ... (此函式維持不變) ... */ };
+        const fetchTripData = async () => {
+            loadingIndicator.textContent = '正在從伺服器載入數據...';
+            chartsContainer.style.display = 'none';
+            try {
+                const response = await fetch(`/api/trip_data?id=${tripId}`);
+                if (!response.ok) {
+                    throw new Error(`伺服器錯誤: ${response.status} ${response.statusText}`);
+                }
+                originalTripData = await response.json();
+                if (originalTripData.error) {
+                    throw new Error(originalTripData.error);
+                }
+                if (originalTripData.length === 0) {
+                    throw new Error('找不到此行程的數據。');
+                }
+                
+                exportBtn.href = `/api/trip/${tripId}/export`;
+                
+                redrawCharts();
+                chartsContainer.style.display = 'block';
+            } catch (error) {
+                subtitle.textContent = `載入 Trip ID: ${tripId} 數據時發生錯誤`;
+                loadingIndicator.textContent = `錯誤: ${error.message}`;
+                console.error("Fetch error:", error);
+            } finally {
+                if (originalTripData.length > 0) {
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+        };
+
+        const aggregateDataByTime = (data, intervalSeconds = 1) => {
+            if (!data || data.length === 0) return [];
+            if (intervalSeconds <= 0) return data;
+
+            const result = [];
+            const intervalMillis = intervalSeconds * 1000;
+            let currentGroup = [];
+            let groupStartTime = new Date(data[0].timestamp).getTime();
+            
+            // Helper to average a group of data points
+            const averageGroup = (group) => {
+                if (group.length === 0) return null;
+                const avg = { timestamp: group[0].timestamp }; // Use the first timestamp for the group
+                const keys = Object.keys(group[0]);
+                
+                for (const key of keys) {
+                    // We only average numerical data. Non-numerical data will take the value from the first point.
+                    if (typeof group[0][key] === 'number') {
+                        const sum = group.reduce((acc, item) => acc + (item[key] || 0), 0);
+                        avg[key] = sum / group.length;
+                    } else {
+                        avg[key] = group[0][key];
+                    }
+                }
+                return avg;
+            };
+
+            for (const point of data) {
+                const pointTime = new Date(point.timestamp).getTime();
+                if (pointTime < groupStartTime + intervalMillis) {
+                    currentGroup.push(point);
+                } else {
+                    if (currentGroup.length > 0) {
+                        result.push(averageGroup(currentGroup));
+                    }
+                    currentGroup = [point];
+                    // Start a new time window from the current point's time
+                    groupStartTime = pointTime;
+                }
+            }
+            // Add the last group
+            if (currentGroup.length > 0) {
+                result.push(averageGroup(currentGroup));
+            }
+            return result;
+        };
  
         // [修改] 事件監聽器現在需要處理多個圖表容器
         document.getElementById('charts-container').addEventListener('click', (e) => {
