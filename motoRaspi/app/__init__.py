@@ -1,4 +1,4 @@
-# app/__init__.py (v4.6 - Attribute Fix)
+# app/__init__.py (v4.7 - DB Write Fix)
 import sqlite3
 import time
 import socket
@@ -37,7 +37,7 @@ else:
     obd_sensor = MockOBD()
 
 
-# --- 設定 (維持不變) ---
+# --- 設定 ---
 NODEMCU_HOSTNAME = "motoplayer.local"
 DATABASE_PATH = "motoplayer.db"
 TRIP_TIMEOUT_MINUTES = 30
@@ -46,10 +46,10 @@ NODEMCU_FETCH_INTERVAL_S = 2.5
 WEBSOCKET_PUSH_INTERVAL_MS = 200
 DB_WRITE_INTERVAL_S = 60
 
-# --- 初始化 (維持不變) ---
+# --- 初始化 ---
 socketio = SocketIO()
 
-# --- 背景任務函式 (維持不變) ---
+# --- 背景任務函式 ---
 def find_mcu_ip():
     try:
         ip = socket.gethostbyname(NODEMCU_HOSTNAME)
@@ -103,8 +103,14 @@ def write_buffer_to_db():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 執行批次寫入，共收到 {len(local_buffer_copy)} 筆原始數據。")
     
     aggregated_records = []
-    avg_fields = ['temperature', 'humidity', 'light_level', 'rpm', 'speed', 'coolant_temp', 'battery_voltage']
-    int_fields = ['light_level', 'rpm', 'speed']
+    # [修改] 更新聚合欄位列表，加入所有新的 OBD 欄位
+    avg_fields = [
+        'temperature', 'humidity', 'light_level', 'rpm', 'speed', 'coolant_temp', 
+        'battery_voltage', 'throttle_pos', 'engine_load', 'abs_load_val', 
+        'timing_advance', 'intake_air_temp', 'intake_map', 'short_term_fuel_trim_b1', 
+        'long_term_fuel_trim_b1', 'o2_sensor_voltage_b1s1'
+    ]
+    int_fields = ['light_level', 'rpm', 'speed', 'intake_map']
     keyfunc = lambda x: x.timestamp.strftime('%Y-%m-%d %H:%M:%S')
     
     for _, group in groupby(sorted(local_buffer_copy, key=keyfunc), key=keyfunc):
@@ -117,13 +123,12 @@ def write_buffer_to_db():
             values = [getattr(item, field) for item in group_list if getattr(item, field) is not None]
             if values:
                 avg_value = mean(values)
-                if field in int_fields:
-                    agg_record[field] = int(round(avg_value))
-                else:
-                    agg_record[field] = avg_value
+                agg_record[field] = int(round(avg_value)) if field in int_fields else avg_value
 
-        agg_record['gear'] = group_list[-1].gear
+        # 最後一個點的狀態數據
         agg_record['uno_status'] = group_list[-1].uno_status
+        agg_record['rfid_card'] = group_list[-1].rfid_card
+        agg_record['fuel_system_status'] = group_list[-1].fuel_system_status
         
         aggregated_records.append(MotoData.model_validate(agg_record))
 
@@ -137,20 +142,40 @@ def write_buffer_to_db():
             state.current_trip_id = int(now.timestamp())
             print(f"============== New Trip Started: {state.current_trip_id} ==============")
 
-        # [修改] 修正此處的拼寫錯誤 (rf_id_card -> rfid_card)
-        records_to_insert = [(dp.timestamp, state.current_trip_id, dp.uno_status, dp.rfid_card, dp.temperature, dp.humidity, dp.light_level, dp.rpm, dp.speed, dp.coolant_temp, dp.battery_voltage, dp.gear) for dp in aggregated_records]
+        # [修改] 準備要插入的數據元組 (tuple)，移除 gear 並加入所有新欄位
+        records_to_insert = [
+            (
+                dp.timestamp, state.current_trip_id, dp.uno_status, dp.rfid_card,
+                dp.temperature, dp.humidity, dp.light_level,
+                dp.rpm, dp.speed, dp.coolant_temp, dp.battery_voltage,
+                dp.throttle_pos, dp.engine_load, dp.abs_load_val, dp.timing_advance,
+                dp.intake_air_temp, dp.intake_map, dp.fuel_system_status,
+                dp.short_term_fuel_trim_b1, dp.long_term_fuel_trim_b1,
+                dp.o2_sensor_voltage_b1s1
+            ) for dp in aggregated_records
+        ]
         
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
-        insert_sql = "INSERT INTO telemetry_data (timestamp, trip_id, uno_status, rfid_card, temperature, humidity, light_level, rpm, speed, coolant_temp, battery_voltage, gear) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"
+        
+        # [修改] INSERT SQL 陳述式，使其與新的資料表結構完全匹配
+        insert_sql = """
+            INSERT INTO telemetry_data (
+                timestamp, trip_id, uno_status, rfid_card, temperature, humidity, light_level,
+                rpm, speed, coolant_temp, battery_voltage,
+                throttle_pos, engine_load, abs_load_val, timing_advance,
+                intake_air_temp, intake_map, fuel_system_status,
+                short_term_fuel_trim_b1, long_term_fuel_trim_b1, o2_sensor_voltage_b1s1
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
         cursor.executemany(insert_sql, records_to_insert)
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
     except Exception as e:
         print(f"[WRITE DB ERROR] {e}")
 
 
 def create_app():
-    # (此函式維持不變)
     app = Flask(__name__)
     socketio.init_app(app)
     scheduler = APScheduler()
