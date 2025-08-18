@@ -19,6 +19,7 @@ class OBDData(BaseModel):
     """
     (v4.0) 定義來自 OBD-II 的車輛數據。
     此版本已擴展以包含所有已知的可用感測器，並移除了檔位計算。
+    預留了數個尚未被任何來源使用或採集的欄位，這些欄位會在未來被使用。
     """
     # --- 核心儀表板數據 (Core Dashboard Data) ---
     rpm: Optional[int] = Field(None, description="引擎轉速 (RPM)")
