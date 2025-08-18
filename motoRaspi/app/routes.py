@@ -5,8 +5,12 @@ import math
 import requests
 import io
 import csv
-from flask import Blueprint, jsonify, request, render_template, Response
+import os
+import pandas as pd
+from werkzeug.utils import secure_filename
+from flask import Blueprint, jsonify, request, render_template, Response, flash, redirect, url_for
 from . import state
+from datetime import datetime, timedelta
 
 DATABASE_PATH = "motoplayer.db"
 bp = Blueprint('main', __name__)
@@ -14,7 +18,6 @@ bp = Blueprint('main', __name__)
 def get_db_connection():
     """建立並回傳一個資料庫連線物件。"""
     conn = sqlite3.connect(DATABASE_PATH)
-    # 讓查詢結果可以像字典一樣透過欄位名稱存取
     conn.row_factory = sqlite3.Row 
     return conn
 
@@ -26,34 +29,50 @@ def calculate_feels_like(temp_c, humidity, speed_kmh):
     apparent_temp = temp_c + (0.33 * vapor_pressure) - (0.70 * wind_speed_ms) - 4.00
     return round(apparent_temp, 1)
 
-# --- 主要頁面路由 (Web Page Routes) ---
+ALLOWED_EXTENSIONS = {'csv'}
+
+def allowed_file(filename):
+    """檢查檔案副檔名是否合法"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- 全新的欄位對應字典，專為「寬格式」CSV 設計 ---
+COLUMN_MAPPING = {
+    '发动机转速 (rpm)': 'rpm',
+    '速度 (GPS) (km/h)': 'speed',
+    '冷却液温度 (℃)': 'coolant_temp',
+    '控制模块电压 (V)': 'battery_voltage',
+    '节气门位置 (%)': 'throttle_pos',
+    '计算出的发动机负荷值 (%)': 'engine_load',
+    '正时提前 (°)': 'timing_advance',
+    '进气温度 (℃)': 'intake_air_temp',
+    '进气歧管绝对压力 (kPa)': 'intake_map',
+    '氧传感器1 单元1 电压 (V)': 'o2_sensor_voltage_b1s1',
+    '氧传感器1 单元1 短期燃油修正 (%)': 'short_term_fuel_trim_b1',
+    '长期燃油修正% - 单元1 (%)': 'long_term_fuel_trim_b1',
+    'fuel_system_status': 'fuel_system_status' # 假設欄位名稱直接對應
+}
+
 
 @bp.route("/")
 def index():
-    """渲染即時儀表板頁面。"""
     return render_template('index.html')
 
 @bp.route("/history")
 def history():
-    """渲染騎行日誌列表頁面。"""
     return render_template('history.html')
 
 @bp.route("/trip/<int:trip_id>")
 def trip_detail(trip_id):
-    """渲染單次騎行詳情分析頁面。"""
     return render_template('trip_detail.html', trip_id=trip_id)
 
-# --- API 端點 (API Endpoints) ---
 
 @bp.route("/api/realtime_data")
 def get_realtime_data():
-    """
-    獲取最新一筆的遙測數據，主要用於 WebSocket 推送前的初始數據填充。
-    """
     latest_data = None;
     with state.state_lock:
-        if state.shared_state["obd"] or state.shared_state["env"]:
-            latest_data = {**state.shared_state["sys"].model_dump(by_alias=True), **state.shared_state["env"].model_dump(), **state.shared_state["obd"].model_dump()}
+        if "obd" in state.shared_state and state.shared_state["obd"] is not None:
+             latest_data = {**state.shared_state["sys"].model_dump(by_alias=True), **state.shared_state["env"].model_dump(), **state.shared_state["obd"].model_dump()}
     
     if latest_data is None:
         try:
@@ -70,11 +89,9 @@ def get_realtime_data():
     except Exception as e:
         print(f"[API ERROR] /api/realtime_data processing failed: {e}"); return jsonify({"error": "An internal server error occurred."}), 500
 
+
 @bp.route("/api/trip_history")
 def get_trip_history():
-    """
-    查詢並回傳所有歷史騎行的摘要列表，供 history.html 使用。
-    """
     try:
         conn = get_db_connection()
         history_rows = conn.execute("SELECT trip_id, MIN(timestamp) as start_time, MAX(timestamp) as end_time, COUNT(id) as data_points, MAX(speed) as max_speed FROM telemetry_data WHERE trip_id IS NOT NULL GROUP BY trip_id ORDER BY trip_id DESC;").fetchall()
@@ -84,11 +101,6 @@ def get_trip_history():
 
 @bp.route("/api/trip_data")
 def get_trip_data():
-    """
-    根據 trip_id，查詢並回傳該次騎行的所有詳細數據點。
-    這是 trip_detail.html 頁面中所有圖表的數據來源。
-    由於使用 'SELECT *'，它會自動包含所有我們在資料庫中新增的欄位。
-    """
     trip_id = request.args.get('id', type=int)
     if trip_id is None: return jsonify({"error": "Missing 'id' parameter."}), 400
     try:
@@ -100,9 +112,84 @@ def get_trip_data():
     except Exception as e:
         print(f"[API ERROR] /api/trip_data: {e}"); return jsonify({"error": "An internal server error occurred."}), 500
 
+
+@bp.route("/api/upload_log", methods=['POST'])
+def upload_log():
+    """
+    全新重構的 CSV 上傳函式，專為處理「寬格式」日誌檔設計。
+    """
+    if 'log_file' not in request.files:
+        flash('請求中沒有檔案部分', 'error')
+        return redirect(url_for('main.history'))
+    
+    file = request.files['log_file']
+    if file.filename == '':
+        flash('未選擇檔案', 'error')
+        return redirect(url_for('main.history'))
+
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        conn = None
+        try:
+            df = pd.read_csv(file, sep=',')
+            df.rename(columns=COLUMN_MAPPING, inplace=True)
+
+            try:
+                date_str = filename.split('_')[0]
+                log_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except (ValueError, IndexError):
+                log_date = datetime.now().date()
+
+            df['timestamp'] = df['time'].apply(lambda t: datetime.combine(log_date, datetime.strptime(t, '%H:%M:%S.%f').time()))
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            max_trip_id_row = cursor.execute("SELECT MAX(trip_id) FROM telemetry_data").fetchone()
+            new_trip_id = (max_trip_id_row[0] or 0) + 1
+
+            db_columns_info = cursor.execute("PRAGMA table_info(telemetry_data);").fetchall()
+            db_columns = [col['name'] for col in db_columns_info]
+            
+            # 修正 1: 加上 .copy() 來避免 SettingWithCopyWarning
+            df_to_insert = df[[col for col in df.columns if col in db_columns]].copy()
+            df_to_insert['trip_id'] = new_trip_id
+
+            for db_col in db_columns:
+                if db_col not in df_to_insert.columns:
+                    df_to_insert[db_col] = None
+            
+            # 修正 2: 將 pandas Timestamp 物件轉換為 SQLite 相容的字串格式
+            df_to_insert['timestamp'] = df_to_insert['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S.%f').str[:-3]
+
+            # 按照資料庫欄位順序排列，並轉換為元組列表
+            records_to_insert = [tuple(row) for row in df_to_insert[db_columns].to_numpy()]
+            
+            placeholders = ', '.join(['?'] * len(db_columns))
+            sql = f"INSERT INTO telemetry_data ({', '.join(db_columns)}) VALUES ({placeholders});"
+
+            cursor.executemany(sql, records_to_insert)
+            conn.commit()
+            
+            flash(f'檔案 "{filename}" 已成功匯入，新的騎行 ID 為 {new_trip_id}。', 'success')
+
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            print(f"[UPLOAD API ERROR] 處理檔案時發生錯誤: {e}")
+            flash(f'處理檔案 "{filename}" 時發生錯誤: {e}', 'error')
+        finally:
+            if conn:
+                conn.close()
+        
+        return redirect(url_for('main.history'))
+
+    else:
+        flash('不支援的檔案類型，請上傳 .csv 檔案。', 'error')
+        return redirect(url_for('main.history'))
+
+
 @bp.route("/api/command", methods=['POST'])
 def handle_command():
-    """接收並處理來自 App (透過藍牙橋接器) 的控制指令。"""
     if not state.mcu_ip_address: return jsonify({"status": "error", "message": "NodeMCU is currently offline."}), 503
     data = request.get_json();
     if not data or 'command' not in data: return jsonify({"status": "error", "message": "Invalid JSON request body."}), 400
@@ -121,7 +208,6 @@ def handle_command():
 
 @bp.route("/api/trip/<int:trip_id>", methods=['DELETE'])
 def delete_trip(trip_id):
-    """刪除指定 trip_id 的所有相關數據。"""
     try:
         conn = get_db_connection(); cursor = conn.cursor()
         cursor.execute("DELETE FROM telemetry_data WHERE trip_id = ?;", (trip_id,)); conn.commit()
@@ -136,9 +222,6 @@ def delete_trip(trip_id):
 
 @bp.route("/api/trip/<int:trip_id>/export")
 def export_trip_csv(trip_id):
-    """
-    根據 trip_id 將該次騎行的所有原始數據匯出為 CSV 檔案。
-    """
     try:
         conn = get_db_connection()
         cursor = conn.cursor()

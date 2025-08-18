@@ -77,6 +77,8 @@ def fetch_nodemcu_data():
 
 def push_data_via_websocket():
     with state.state_lock:
+        if not all(key in state.shared_state for key in ["sys", "env", "obd"]):
+            return
         full_data = {**state.shared_state["sys"].model_dump(by_alias=True), **state.shared_state["env"].model_dump(), **state.shared_state["obd"].model_dump()}
     try:
         final_data = MotoData.model_validate(full_data)
@@ -103,7 +105,6 @@ def write_buffer_to_db():
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 執行批次寫入，共收到 {len(local_buffer_copy)} 筆原始數據。")
     
     aggregated_records = []
-    # [修改] 更新聚合欄位列表，加入所有新的 OBD 欄位
     avg_fields = [
         'temperature', 'humidity', 'light_level', 'rpm', 'speed', 'coolant_temp', 
         'battery_voltage', 'throttle_pos', 'engine_load', 'abs_load_val', 
@@ -125,7 +126,6 @@ def write_buffer_to_db():
                 avg_value = mean(values)
                 agg_record[field] = int(round(avg_value)) if field in int_fields else avg_value
 
-        # 最後一個點的狀態數據
         agg_record['uno_status'] = group_list[-1].uno_status
         agg_record['rfid_card'] = group_list[-1].rfid_card
         agg_record['fuel_system_status'] = group_list[-1].fuel_system_status
@@ -142,7 +142,7 @@ def write_buffer_to_db():
             state.current_trip_id = int(now.timestamp())
             print(f"============== New Trip Started: {state.current_trip_id} ==============")
 
-        # [修改] 準備要插入的數據元組 (tuple)，移除 gear 並加入所有新欄位
+        # 修正: 準備要插入的數據元組 (tuple)，使其與 init_db.py 的結構完全匹配
         records_to_insert = [
             (
                 dp.timestamp, state.current_trip_id, dp.uno_status, dp.rfid_card,
@@ -158,7 +158,7 @@ def write_buffer_to_db():
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         
-        # [修改] INSERT SQL 陳述式，使其與新的資料表結構完全匹配
+        # 修正: INSERT SQL 陳述式，使其與 init_db.py 的結構完全匹配
         insert_sql = """
             INSERT INTO telemetry_data (
                 timestamp, trip_id, uno_status, rfid_card, temperature, humidity, light_level,
@@ -177,6 +177,9 @@ def write_buffer_to_db():
 
 def create_app():
     app = Flask(__name__)
+    
+    app.config['SECRET_KEY'] = 'a-secure-random-string-for-motoplayer-project'
+
     socketio.init_app(app)
     scheduler = APScheduler()
     scheduler.add_job(id='FetchOBDJob', func=fetch_obd_data, trigger='interval', seconds=OBD_FETCH_INTERVAL_MS / 1000)

@@ -4,11 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>騎行日誌 - MotoPlayer</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/fonts.css') }}">
+    <!-- 專案既有的 CSS 引用 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/font.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
         body {
             font-family: 'Inter', sans-serif;
+        }
+        /* Flash 訊息的專屬樣式 */
+        .flashes {
+            list-style: none;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+        }
+        .flashes li {
+            padding: 0;
+            margin: 0;
+        }
+        /* 成功訊息樣式 */
+        .flash-success {
+            background-color: #1a3c31;
+            border-left: 6px solid #34d399;
+            color: #a7f3d0;
+        }
+        /* 錯誤訊息樣式 */
+        .flash-error {
+            background-color: #4a1d1d;
+            border-left: 6px solid #f87171;
+            color: #fecaca;
         }
     </style>
 </head>
@@ -19,10 +44,33 @@
                 <h1 class="text-3xl md:text-4xl font-bold text-white">騎行日誌</h1>
                 <p class="text-gray-400">所有歷史騎行紀錄</p>
             </div>
-            <a href="/" class="px-4 py-2 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 transition-colors">
-                返回即時儀表板
-            </a>
+            <!-- 按鈕區塊 -->
+            <div class="space-x-4">
+                <!-- 新增的匯入日誌按鈕 -->
+                <button id="import-log-btn" class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors">
+                    匯入日誌
+                </button>
+                <a href="/" class="px-4 py-2 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 transition-colors">
+                    返回即時儀表板
+                </a>
+            </div>
         </header>
+
+        <!-- Flask Flash 訊息顯示區塊 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <ul class="flashes flash-{{ category or 'info' }}">
+                <li>{{ message }}</li>
+              </ul>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <!-- 隱藏的檔案上傳表單 -->
+        <form id="upload-form" action="{{ url_for('main.upload_log') }}" method="post" enctype="multipart/form-data" style="display: none;">
+            <input type="file" name="log_file" id="log-file-input" accept=".csv">
+        </form>
 
         <main class="bg-gray-800 p-4 rounded-xl shadow-lg">
             <div class="overflow-x-auto">
@@ -52,9 +100,23 @@
     </div>
 
     <script>
+        // --- 整合後的 JavaScript ---
+
+        // 處理檔案上傳的邏輯
+        document.getElementById('import-log-btn').addEventListener('click', function() {
+            document.getElementById('log-file-input').click();
+        });
+
+        document.getElementById('log-file-input').addEventListener('change', function() {
+            if (this.files.length > 0) {
+                document.getElementById('upload-form').submit();
+            }
+        });
+
+        // 您既有的動態載入與刪除邏輯
         const tableBody = document.getElementById('history-table-body');
         const loadingIndicator = document.getElementById('loading-indicator');
-        let activeConfirmButton = null; // 用於追蹤待確認的刪除按鈕
+        let activeConfirmButton = null;
 
         const fetchHistory = async () => {
             try {
@@ -78,7 +140,7 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">${trip.trip_id}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">${startTime}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">${endTime}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-400">${trip.max_speed}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-400">${trip.max_speed ? trip.max_speed.toFixed(1) : 'N/A'}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">${trip.data_points}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-4">
                                 <a href="/trip/${trip.trip_id}" class="text-cyan-400 hover:text-cyan-300">查看詳情</a>
@@ -91,8 +153,11 @@
 
             } catch (error) {
                 console.error("無法獲取歷史紀錄:", error);
-                loadingIndicator.textContent = '載入失敗，請稍後再試。';
-                loadingIndicator.classList.add('text-red-400');
+                const loadingCell = tableBody.querySelector('td');
+                if(loadingCell) {
+                    loadingCell.textContent = '載入失敗，請稍後再試。';
+                    loadingCell.classList.add('text-red-400');
+                }
             }
         };
 
