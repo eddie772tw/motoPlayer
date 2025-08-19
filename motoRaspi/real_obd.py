@@ -1,170 +1,196 @@
-# real_obd.py
+# mock_obd.py (Asynchronous Refactored)
+#
+# 版本: 5.0 Async
+# 描述: 此版本已從同步類別重構為非同步類別，以匹配 real_obd.py (BLE版) 的非同步介面。
+#      這確保了開發者可以在真實與模擬 OBD 環境之間無縫切換，以利於除錯。
 
-import serial
+import asyncio
+import random
 import time
 from typing import Optional
 
+# --- Pydantic 模型模擬 ---
 try:
     from app.models import OBDData
 except ImportError:
-    print("[FATAL ERROR] 無法匯入 'app.models'。請確保此腳本的執行路徑正確。")
+    print("[WARNING] 無法匯入 'app.models'。將使用內部模擬的 OBDData 類別。")
     class OBDData:
         def __init__(self, **kwargs): self.__dict__.update(kwargs)
         def __repr__(self): return f"OBDData({self.__dict__})"
 
-# =================================================================
-# --- 常數定義 (Constants) ---
-# =================================================================
-
-# ELM327 初始化指令
-ELM327_RESET = "ATZ"
-ELM327_ECHO_OFF = "ATE0"
-ELM327_LINEFEEDS_OFF = "ATL0"
-ELM327_AUTO_PROTOCOL = "ATSP0"
-ELM327_HEADERS_OFF = "ATH0"
-
-# 我們將要主動獲取的核心 PID
-PID_RPM = "010C"
-PID_SPEED = "010D"
-PID_COOLANT_TEMP = "0105"
-PID_MODULE_VOLTAGE = "0142"
-
-# 其他未來可能用到的 PID (暫不使用)
-# PID_THROTTLE_POS = "0111"
-# PID_ENGINE_LOAD = "0104"
-# ...
-
-class RealOBD:
+class MockOBD:
     """
-    與真實的 ELM327 OBD-II 藍牙適配器進行通訊的類別。
-    此版本已簡化，專注於獲取核心儀表板數據。
+    一個數據驅動的、非同步的 OBD-II 模擬器。
+    其生成的數據模式和範圍，皆基於真實日誌檔案進行校準，
+    並提供與 RealOBD (BLE版) 完全一致的非同步方法。
     """
-    def __init__(self, port="/dev/rfcomm0", baudrate=38400, timeout=1):
-        self.port = port
-        self.baudrate = baudrate
-        self.timeout = timeout
-        self.ser = None
+    def __init__(self):
+        """初始化模擬器的狀態。"""
+        # 騎乘狀態: 'IDLE', 'ACCELERATING', 'CRUISING', 'DECELERATING'
+        self.ride_state = 'IDLE'
+        self.state_timer = time.time()
         self.is_connected = False
 
-    def connect(self) -> bool:
+        # 核心數據，初始值模擬冷車啟動
+        self.rpm = 1500
+        self.speed = 0
+        self.coolant_temp = 45.0
+        self.battery_voltage = 12.6
+        self.throttle_pos = 3.0
+        self.engine_load = 15.0
+        
+        # 其他感測器數據
+        self.abs_load_val = 10.0
+        self.timing_advance = 8.0
+        self.intake_air_temp = 35.0
+        self.intake_map = 30
+        self.fuel_system_status = "Closed loop"
+        self.short_term_fuel_trim_b1 = 0.0
+        self.long_term_fuel_trim_b1 = 0.0
+        self.o2_sensor_voltage_b1s1 = 0.5
+
+        self.start_time = time.time()
+
+    async def connect(self) -> bool:
         """
-        建立與 OBD-II 適配器的序列埠連線，並執行初始化。
+        (非同步) 模擬連線過程。
         """
-        print(f"正在嘗試連線到 {self.port}...")
-        try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+        print("正在模擬連線到 OBD-II 適配器...")
+        await asyncio.sleep(0.1) # 模擬網路延遲
+        self.is_connected = True
+        print("模擬 OBD-II 適配器連線成功！")
+        return True
+
+    async def disconnect(self):
+        """
+        (非同步) 模擬中斷連線。
+        """
+        self.is_connected = False
+        print("模擬 OBD-II 連線已關閉。")
+        await asyncio.sleep(0.05)
+
+    def _update_ride_state(self):
+        """(同步) 根據計時器隨機切換騎乘狀態，模擬真實的騎乘行為。"""
+        if time.time() - self.state_timer > random.uniform(3, 10):
+            if self.ride_state == 'IDLE':
+                self.ride_state = 'ACCELERATING'
+            elif self.ride_state == 'ACCELERATING':
+                self.ride_state = 'CRUISING'
+            elif self.ride_state == 'CRUISING':
+                self.ride_state = random.choice(['DECELERATING', 'ACCELERATING'])
+            elif self.ride_state == 'DECELERATING':
+                self.ride_state = 'IDLE' if self.speed < 5 else 'ACCELERATING'
             
-            self._send_command(ELM327_RESET, delay_after=1.5)
-            self._send_command(ELM327_ECHO_OFF)
-            self._send_command(ELM327_LINEFEEDS_OFF)
-            self._send_command(ELM327_AUTO_PROTOCOL)
-            self._send_command(ELM327_HEADERS_OFF)
+            self.state_timer = time.time()
 
-            self.is_connected = True
-            print("OBD-II 適配器連線並初始化成功！")
-            return True
-        except serial.SerialException as e:
-            print(f"[ERROR] 無法開啟序列埠 {self.port}: {e}")
-            self.is_connected = False
-            return False
+    def _generate_data_based_on_state(self):
+        """(同步) 根據當前的騎乘狀態，生成一組有關聯性的模擬數據。"""
+        self._update_ride_state()
 
-    def disconnect(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-        self.is_connected = False
-        print("OBD-II 連線已關閉。")
-
-    def _send_command(self, command: str, delay_after: float = 0.05) -> str:
-        """
-        (私有方法) 發送指令並讀取回應。
-        """
-        if not (self.ser and self.ser.is_open):
-            return "ERROR: NOT CONNECTED"
+        # --- 根據狀態更新核心數據 ---
+        if self.ride_state == 'IDLE':
+            self.speed = max(0, self.speed - random.uniform(1, 5))
+            self.rpm = random.uniform(1400, 1600)
+            self.throttle_pos = random.uniform(2.0, 5.0)
+            self.engine_load = random.uniform(15.0, 25.0)
         
-        self.ser.reset_input_buffer()
-        self.ser.write((command + '\r').encode('utf-8'))
+        elif self.ride_state == 'ACCELERATING':
+            self.speed += random.uniform(2, 8)
+            self.throttle_pos = min(100, self.throttle_pos + random.uniform(5, 15))
+            self.rpm = self.speed * random.uniform(60, 90) + (self.throttle_pos * 20)
+            self.engine_load = min(100, self.engine_load + random.uniform(10, 20))
+
+        elif self.ride_state == 'CRUISING':
+            self.speed += random.uniform(-2, 2)
+            self.throttle_pos = random.uniform(15.0, 40.0)
+            self.rpm = self.speed * random.uniform(50, 70)
+            self.engine_load = random.uniform(30.0, 50.0)
+
+        elif self.ride_state == 'DECELERATING':
+            self.speed = max(0, self.speed - random.uniform(5, 10))
+            self.throttle_pos = max(0, self.throttle_pos - random.uniform(10, 20))
+            self.rpm = self.speed * random.uniform(40, 60) + 1500
+            self.engine_load = max(10, self.engine_load - random.uniform(5, 15))
+
+        # --- 數據邊界與合理性約束 ---
+        self.speed = max(0, min(self.speed, 200))
+        self.rpm = max(0, min(self.rpm, 12000)) if self.speed > 0 else random.uniform(1400, 1600)
+        self.throttle_pos = max(0, min(self.throttle_pos, 100))
+        self.engine_load = max(0, min(self.engine_load, 100))
         
-        lines = []
-        while True:
-            try:
-                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                if '>' in line:
-                    break
-                if line:
-                    lines.append(line)
-            except serial.SerialException:
-                return "ERROR: READ FAILED"
+        # --- 更新其他感測器數據 ---
+        elapsed_time = time.time() - self.start_time
+        if self.coolant_temp < 90:
+            self.coolant_temp += elapsed_time * 0.01
+        else:
+            self.coolant_temp = random.uniform(88.0, 95.0)
+        
+        self.battery_voltage = random.uniform(13.8, 14.4) if self.rpm > 1000 else 12.6
+        self.intake_air_temp = self.coolant_temp - random.uniform(30, 40)
+        self.intake_map = int(self.engine_load * 0.8 + 20)
+        self.timing_advance = 10 + (self.rpm / 1000) * 2
+        self.short_term_fuel_trim_b1 = random.uniform(-5.0, 5.0)
 
-        time.sleep(delay_after)
-        response = "".join(lines).replace(command, "").strip()
-        return response
-
-    # --- 數據解析的私有方法 ---
-    def _parse_rpm(self, response: str) -> Optional[int]:
-        parts = response.split()
-        if len(parts) >= 4 and parts[0] == "41" and parts[1] == "0C":
-            try: return int(((int(parts[2], 16) * 256) + int(parts[3], 16)) / 4)
-            except: return None
-        return None
-
-    def _parse_speed(self, response: str) -> Optional[int]:
-        parts = response.split()
-        if len(parts) >= 3 and parts[0] == "41" and parts[1] == "0D":
-            try: return int(parts[2], 16)
-            except: return None
-        return None
-    
-    def _parse_coolant_temp(self, response: str) -> Optional[float]:
-        parts = response.split()
-        if len(parts) >= 3 and parts[0] == "41" and parts[1] == "05":
-            try: return float(int(parts[2], 16) - 40)
-            except: return None
-        return None
-
-    def _parse_voltage(self, response: str) -> Optional[float]:
-        parts = response.split()
-        if len(parts) >= 4 and parts[0] == "41" and parts[1] == "42":
-            try: return round(((int(parts[2], 16) * 256) + int(parts[3], 16)) / 1000.0, 2)
-            except: return None
-        return None
-
-    # --- 公開的主要方法 ---
-    def get_obd_data(self) -> OBDData:
+    async def get_obd_data(self) -> OBDData:
         """
-        獲取核心儀表板數據，並打包成一個完整的 (但大部分為空) OBDData 物件。
+        (非同步) 獲取一組模擬的、基於真實日誌數據模式的 OBD-II 數據。
         """
         if not self.is_connected:
             return OBDData()
 
-        # 依序獲取並解析核心數據
-        rpm = self._parse_rpm(self._send_command(PID_RPM))
-        speed = self._parse_speed(self._send_command(PID_SPEED))
-        coolant_temp = self._parse_coolant_temp(self._send_command(PID_COOLANT_TEMP))
-        battery_voltage = self._parse_voltage(self._send_command(PID_MODULE_VOLTAGE))
+        # 模擬非同步 I/O 操作的延遲
+        await asyncio.sleep(0.01) 
+        
+        self._generate_data_based_on_state()
 
-        # 回傳 Pydantic 物件，未提供的欄位將自動為 None
+        # 回傳一個包含所有欄位的完整 OBDData 物件
         return OBDData(
-            rpm=rpm,
-            speed=speed,
-            coolant_temp=coolant_temp,
-            battery_voltage=battery_voltage,
+            rpm=int(self.rpm),
+            speed=int(self.speed),
+            coolant_temp=round(self.coolant_temp, 1),
+            battery_voltage=round(self.battery_voltage, 2),
+            throttle_pos=round(self.throttle_pos, 2),
+            engine_load=round(self.engine_load, 2),
+            abs_load_val=round(self.engine_load * 0.8, 2),
+            timing_advance=round(self.timing_advance, 1),
+            intake_air_temp=round(self.intake_air_temp, 1),
+            intake_map=int(self.intake_map),
+            fuel_system_status=self.fuel_system_status,
+            short_term_fuel_trim_b1=round(self.short_term_fuel_trim_b1, 2),
+            long_term_fuel_trim_b1=self.long_term_fuel_trim_b1,
+            o2_sensor_voltage_b1s1=round(self.o2_sensor_voltage_b1s1, 3)
         )
 
 # =================================================================
-# --- 獨立執行時的測試區塊 ---
+# --- 獨立執行時的非同步測試區塊 ---
 # =================================================================
-if __name__ == '__main__':
-    print("--- RealOBD 獨立測試模式 (v4.0 簡化版) ---")
-    obd_sensor = RealOBD(port="/dev/rfcomm0")
+async def main_test():
+    """
+    用於獨立測試此模組的非同步主函式。
+    """
+    print("--- MockOBD (Async) 獨立測試模式 ---")
+    mock_sensor = MockOBD()
     try:
-        if obd_sensor.connect():
-            print("\n--- 開始循環讀取數據 (每秒一次)，按 Ctrl+C 結束 ---")
+        if await mock_sensor.connect():
+            print("\n--- 開始循環生成數據 (每 500ms 一次)，按 Ctrl+C 結束 ---")
             while True:
-                data = obd_sensor.get_obd_data()
-                print(f"[{time.strftime('%H:%M:%S')}] RPM: {data.rpm}, Speed: {data.speed}, Temp: {data.coolant_temp}, Voltage: {data.battery_voltage}")
-                time.sleep(1)
+                data = await mock_sensor.get_obd_data()
+                print(
+                    f"[{time.strftime('%H:%M:%S')}] "
+                    f"State: {mock_sensor.ride_state.ljust(12)} | "
+                    f"RPM: {data.rpm:<5} | "
+                    f"Speed: {data.speed:<3} km/h | "
+                    f"Throttle: {data.throttle_pos:.1f}% | "
+                    f"Temp: {data.coolant_temp}°C"
+                )
+                await asyncio.sleep(0.5)
+    except Exception as e:
+        print(f"測試過程中發生錯誤: {e}")
+    finally:
+        await mock_sensor.disconnect()
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main_test())
     except KeyboardInterrupt:
         print("\n使用者手動中斷程式。")
-    finally:
-        print("正在關閉連線...")
-        obd_sensor.disconnect()
