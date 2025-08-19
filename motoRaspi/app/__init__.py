@@ -1,4 +1,15 @@
-# app/__init__.py (v4.7 - DB Write Fix)
+# app/__init__.py (v5.2 - Async Bridge Fix)
+#
+# 版本更新說明:
+# 此版本已進行重構，以完全支援新的非同步 real_obd.py (BLE) 和 mock_obd.py。
+# 主要變更:
+# 1. OBD 初始化邏輯移至一個非同步函式 `initialize_obd_sensor` 中。
+# 2. 背景任務 `fetch_obd_data` 已轉換為 `async def`，並使用 `await` 來呼叫 OBD 資料獲取函式。
+# 3. 在應用程式啟動時，會先執行一次非同步的感測器初始化。
+# 4. [FIX] 修正了 APScheduler 新增非同步任務的方法，從錯誤的 `scheduler.api.add_job` 改回正確的 `scheduler.add_job`。
+# 5. [FIX] 將 fetch_obd_data 改回同步函式，並在內部使用 asyncio.run() 來執行非同步的 get_obd_data，解決同步/非同步混用問題。
+
+import asyncio
 import sqlite3
 import time
 import socket
@@ -16,28 +27,11 @@ from . import state
 from app.models import MotoData, EnvironmentalData, SystemStatus
 import config
 
-# --- OBD 感測器初始化 ---
+# --- 全域 OBD 感測器實例 ---
+# 注意: 初始化時為 None，將在應用啟動時透過非同步函式進行實例化和連線。
 obd_sensor = None
-if config.OBD_MODE == 'REAL':
-    try:
-        from real_obd import RealOBD
-        print(f"--- 使用真實OBD模式 (埠: {config.REAL_OBD_PORT}) ---")
-        obd_sensor = RealOBD(port=config.REAL_OBD_PORT, baudrate=config.REAL_OBD_BAUDRATE)
-        if not obd_sensor.connect():
-            print("[WARNING] 無法連接到真實OBD感測器，將退回使用模擬器。")
-            from mock_obd import MockOBD
-            obd_sensor = MockOBD()
-    except (ImportError, FileNotFoundError):
-        print("[ERROR] 'real_obd.py' 檔案不存在或無法匯入，將退回使用模擬器。")
-        from mock_obd import MockOBD
-        obd_sensor = MockOBD()
-else:
-    from mock_obd import MockOBD
-    print("--- 使用模擬OBD模式 ---")
-    obd_sensor = MockOBD()
 
-
-# --- 設定 ---
+# --- 設定 (與原版相同) ---
 NODEMCU_HOSTNAME = "motoplayer.local"
 DATABASE_PATH = "motoplayer.db"
 TRIP_TIMEOUT_MINUTES = 30
@@ -49,20 +43,64 @@ DB_WRITE_INTERVAL_S = 60
 # --- 初始化 ---
 socketio = SocketIO()
 
-# --- 背景任務函式 ---
+# =================================================================
+# --- 非同步 OBD 感測器初始化 ---
+# =================================================================
+async def initialize_obd_sensor():
+    """
+    (非同步) 在應用程式啟動時執行，負責建立 OBD 感測器實例並嘗試連線。
+    """
+    global obd_sensor
+    
+    if config.OBD_MODE == 'REAL':
+        try:
+            from real_obd import RealOBD
+            print(f"--- [Async] 使用真實OBD (BLE) 模式 (位址: {config.OBD_BLE_ADDRESS}) ---")
+            # 傳入設定檔中的 BLE 位址
+            obd_sensor = RealOBD(device_address=config.OBD_BLE_ADDRESS)
+            if not await obd_sensor.connect():
+                print("[WARNING] 無法連接到真實OBD (BLE) 感測器，將退回使用模擬器。")
+                from mock_obd import MockOBD
+                obd_sensor = MockOBD()
+                await obd_sensor.connect() # 連接模擬器
+        except (ImportError, FileNotFoundError):
+            print("[ERROR] 'real_obd.py' 檔案不存在或無法匯入，將退回使用模擬器。")
+            from mock_obd import MockOBD
+            obd_sensor = MockOBD()
+            await obd_sensor.connect() # 連接模擬器
+    else:
+        from mock_obd import MockOBD
+        print("--- [Async] 使用模擬OBD模式 ---")
+        obd_sensor = MockOBD()
+        await obd_sensor.connect() # 連接模擬器
+
+# =================================================================
+# --- 背景任務函式 (部分已修改為 Async) ---
+# =================================================================
+
 def find_mcu_ip():
+    # 此函式不涉及 I/O 密集操作，保持同步即可
     try:
         ip = socket.gethostbyname(NODEMCU_HOSTNAME)
         if ip != state.mcu_ip_address: print(f"[INFO] mDNS: '{NODEMCU_HOSTNAME}' -> {ip}"); state.mcu_ip_address = ip
     except socket.gaierror:
         if state.mcu_ip_address is not None: print(f"[WARNING] mDNS: 無法解析 '{NODEMCU_HOSTNAME}'。"); state.mcu_ip_address = None
 
+# [FIXED] 改回同步函式，作為同步與非同步之間的橋樑
 def fetch_obd_data():
-    obd_data_obj = obd_sensor.get_obd_data()
-    with state.state_lock:
-        state.shared_state["obd"] = obd_data_obj
+    """(同步) 從 OBD 感測器獲取數據的排程任務。"""
+    if obd_sensor:
+        try:
+            # [FIXED] 在同步函式中，使用 asyncio.run() 來執行並等待非同步函式完成
+            obd_data_obj = asyncio.run(obd_sensor.get_obd_data())
+            with state.state_lock:
+                state.shared_state["obd"] = obd_data_obj
+        except Exception as e:
+            print(f"[ERROR in fetch_obd_data]: {e}")
+
 
 def fetch_nodemcu_data():
+    # 此函式使用 requests，為同步 I/O，保持不變
     if not state.mcu_ip_address: find_mcu_ip()
     if not state.mcu_ip_address: return
     try:
@@ -76,6 +114,7 @@ def fetch_nodemcu_data():
         state.mcu_ip_address = None
 
 def push_data_via_websocket():
+    # 此函式主要處理內部狀態和 socketio.emit，保持同步
     with state.state_lock:
         if not all(key in state.shared_state for key in ["sys", "env", "obd"]):
             return
@@ -97,7 +136,7 @@ def push_data_via_websocket():
         print(f"[WEBSOCKET PUSH ERROR] {e}")
 
 def write_buffer_to_db():
-    """[低頻任務] 聚合緩衝區數據並批次寫入資料庫"""
+    # 此函式為 CPU 密集和同步的資料庫 I/O，保持不變
     with state.db_buffer_lock:
         if not state.db_write_buffer: return
         local_buffer_copy = state.db_write_buffer.copy(); state.db_write_buffer.clear()
@@ -142,7 +181,6 @@ def write_buffer_to_db():
             state.current_trip_id = int(now.timestamp())
             print(f"============== New Trip Started: {state.current_trip_id} ==============")
 
-        # 修正: 準備要插入的數據元組 (tuple)，使其與 init_db.py 的結構完全匹配
         records_to_insert = [
             (
                 dp.timestamp, state.current_trip_id, dp.uno_status, dp.rfid_card,
@@ -158,7 +196,6 @@ def write_buffer_to_db():
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         
-        # 修正: INSERT SQL 陳述式，使其與 init_db.py 的結構完全匹配
         insert_sql = """
             INSERT INTO telemetry_data (
                 timestamp, trip_id, uno_status, rfid_card, temperature, humidity, light_level,
@@ -177,8 +214,12 @@ def write_buffer_to_db():
 
 def create_app():
     app = Flask(__name__)
-    
     app.config['SECRET_KEY'] = 'a-secure-random-string-for-motoplayer-project'
+
+    # 在啟動排程器之前，先執行非同步的感測器初始化
+    print("正在執行非同步 OBD 感測器初始化...")
+    asyncio.run(initialize_obd_sensor())
+    print("OBD 感測器初始化完成。")
 
     socketio.init_app(app)
     scheduler = APScheduler()
@@ -188,6 +229,7 @@ def create_app():
     scheduler.add_job(id='WriteDBJob', func=write_buffer_to_db, trigger='interval', seconds=DB_WRITE_INTERVAL_S)
     scheduler.init_app(app)
     scheduler.start()
+    
     print("多執行緒背景服務已啟動。")
     from . import routes
     app.register_blueprint(routes.bp)
