@@ -1,18 +1,15 @@
-# real_obd.py (BLE Refactored)
+# real_obd.py (RFCOMM Final)
 #
-# 版本: 5.1 Performance Test
-# 描述: 此版本已從傳統藍牙序列埠 (pyserial) 徹底重構為低功耗藍牙 (BLE) 通訊。
-#      它使用 bleak 函式庫來與 ELM327 BLE 適配器進行非同步通訊，
-#      同時保留了所有原始的 ELM327 指令集和數據解析邏輯。
-#      獨立測試區塊已增強，可測量每次輪詢的耗時以驗證性能。
+# 版本: 6.1 (Standalone Testable)
+# 描述: 此版本已從 BLE 方案切換回更穩定的傳統藍牙 RFCOMM Socket 方案。
+#      它使用 PyBluez 函式庫直接建立連線，並在初始化時執行
+#      一套完整的診斷與協議設定指令，以確保與 ECU 的穩定通訊。
+#      [NEW] 新增了 if __name__ == '__main__' 區塊，使此檔案可獨立執行以進行測試。
 
-import asyncio
+import bluetooth
 import time
-from typing import Optional, Dict
-from bleak import BleakClient, BleakError
+from typing import Optional
 
-# --- Pydantic 模型模擬 ---
-# 在獨立執行時，若無法從 app.models 導入，則建立一個模擬的 OBDData 類別以便測試。
 try:
     from app.models import OBDData
 except ImportError:
@@ -22,115 +19,109 @@ except ImportError:
         def __repr__(self): return f"OBDData({self.__dict__})"
 
 # =================================================================
-# --- BLE & ELM327 常數定義 ---
+# ---               ELM327 指令集 (Constants)                   ---
 # =================================================================
 
-# TODO: 請務必根據您的 nRF Connect 掃描結果，填寫以下 BLE 參數
-OBD_BLE_ADDRESS = "66:1E:32:8A:55:2C"  # ELM327 適配器的 MAC 位址
-# 用於寫入指令 (AT, PID) 到 ELM327 的特徵 UUID (通常稱為 TX 或 Write)
-UART_TX_CHAR_UUID = "0000fff2-0000-1000-8000-00805f9b34fb" # 假設值，請替換
-# 用於接收 ELM327 回應數據的特徵 UUID (通常稱為 RX 或 Notify)
-UART_RX_CHAR_UUID = "0000fff1-0000-1000-8000-00805f9b34fb" # 假設值，請替換
-
-# ELM327 初始化指令
-ELM327_INIT_COMMANDS: Dict[str, float] = {
-    "ATZ": 1.5,      # 重置 ELM327
-    "ATE0": 0.1,     # 關閉指令回顯 (Echo Off)
-    "ATL0": 0.1,     # 關閉換行 (Linefeeds Off)
-    "ATH0": 0.1,     # 關閉標頭 (Headers Off)
-    "ATSP0": 0.1,    # 自動偵測協議
-}
+# 關鍵初始化指令序列
+ELM327_INIT_SEQUENCE = [
+    "ATZ",          # 重置 ELM327
+    "ATE0",         # 關閉指令回顯
+    "ATL0",         # 關閉換行
+    "ATH0",         # 關閉標頭
+    "ATSP5",        # 強制使用協議 5: ISO 14230-4 KWP (fast init)
+]
 
 # 核心 PID (Parameter IDs)
 PID_RPM = "010C"
 PID_SPEED = "010D"
 PID_COOLANT_TEMP = "0105"
-PID_MODULE_VOLTAGE = "0142"
+PID_MODULE_VOLTAGE = "ATRV" # 使用 AT 指令直接讀取電壓更可靠
 
 class RealOBD:
     """
-    透過 BLE 與真實的 ELM327 OBD-II 適配器進行非同步通訊的類別。
+    透過 RFCOMM Socket 與真實的 ELM327 OBD-II 適配器進行同步通訊的類別。
     """
-    def __init__(self, device_address: str):
-        self.device_address = device_address
-        self.client: Optional[BleakClient] = None
-        self.is_connected: bool = False
-        self.response_queue: asyncio.Queue = asyncio.Queue()
-        self.buffer = ""
+    def __init__(self, mac_address, channel=1):
+        self.mac_address = mac_address
+        self.channel = channel
+        self.sock: Optional[bluetooth.BluetoothSocket] = None
+        self.is_connected = False
 
-    async def connect(self) -> bool:
+    def connect(self) -> bool:
         """
-        建立與 OBD-II 適配器的 BLE 連線，啟用通知，並執行初始化指令序列。
+        建立與 OBD-II 適配器的 RFCOMM Socket 連線，並執行初始化序列。
         """
-        print(f"正在嘗試連線到 BLE 適配器: {self.device_address}...")
+        print(f"正在嘗試連線到 {self.mac_address} 的 RFCOMM 頻道 {self.channel}...")
         try:
-            self.client = BleakClient(self.device_address)
-            await self.client.connect()
+            self.sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+            self.sock.connect((self.mac_address, self.channel))
+            self.sock.settimeout(5.0)
+            print("[+] RFCOMM Socket 連線成功！")
 
-            # 啟用來自 RX 特徵的通知
-            await self.client.start_notify(UART_RX_CHAR_UUID, self._notification_handler)
-            print(f"已成功連線並啟用對特徵 {UART_RX_CHAR_UUID} 的通知。")
+            # 執行初始化序列
+            print("[*] 正在執行 ELM327 初始化序列...")
+            for cmd in ELM327_INIT_SEQUENCE:
+                response = self._send_command(cmd)
+                print(f"  > {cmd:<5}... {response.splitlines()[0]}")
+                if "OK" not in response and "ELM" not in response:
+                    print(f"[!] 初始化指令 '{cmd}' 失敗，中止連線。")
+                    self.disconnect()
+                    return False
+                time.sleep(0.1)
             
-            # 執行初始化指令
-            print("正在初始化 ELM327...")
-            for cmd, delay in ELM327_INIT_COMMANDS.items():
-                response = await self._send_command(cmd, timeout=2.0)
-                print(f"  > {cmd}... {response}")
-                await asyncio.sleep(delay)
+            print("[*] 正在嘗試與 ECU 進行首次通訊 (0100)...")
+            response = self._send_command("0100")
+            if "NO DATA" in response or "ERROR" in response:
+                 print(f"[!] 無法與 ECU 建立通訊: {response.splitlines()[0]}")
+                 self.disconnect()
+                 return False
 
+            print("[+] ECU 通訊已建立！OBD 感測器準備就緒。")
             self.is_connected = True
-            print("OBD-II 適配器 (BLE) 連線並初始化成功！")
             return True
-        except (BleakError, asyncio.TimeoutError) as e:
-            print(f"[ERROR] BLE 連線或初始化失敗: {e}")
-            self.is_connected = False
+
+        except Exception as e:
+            print(f"[!] 連線或初始化失敗: {e}")
+            self.disconnect()
             return False
 
-    async def disconnect(self):
-        """
-        中斷 BLE 連線。
-        """
-        if self.client and self.client.is_connected:
-            await self.client.disconnect()
+    def disconnect(self):
+        """關閉 Socket 連線。"""
+        if self.sock:
+            self.sock.close()
+        self.sock = None
         self.is_connected = False
-        print("OBD-II (BLE) 連線已關閉。")
+        print("OBD-II (RFCOMM) 連線已關閉。")
 
-    def _notification_handler(self, sender: int, data: bytearray):
-        """
-        (回呼函式) 處理從 BLE 特徵收到的通知數據。
-        """
-        decoded_data = data.decode('utf-8', errors='ignore')
-        # ELM327 的回應通常以 '>' 結尾，我們以此作為一個完整數據包的標誌
-        self.buffer += decoded_data
-        if '>' in self.buffer:
-            # 將完整的回應放入佇列
-            self.response_queue.put_nowait(self.buffer.strip())
-            self.buffer = ""
-
-    async def _send_command(self, command: str, timeout: float = 1.0) -> str:
-        """
-        (私有方法) 發送指令到 TX 特徵，並等待來自通知佇列的回應。
-        """
-        if not self.is_connected or not self.client:
+    def _send_command(self, command: str) -> str:
+        """(私有方法) 發送指令並接收完整的回應。"""
+        if not self.sock:
             return "ERROR: NOT CONNECTED"
-
-        # 清空佇列，確保只接收本次指令的回應
-        while not self.response_queue.empty():
-            self.response_queue.get_nowait()
-
-        # 發送指令 (必須以 '\r' 結尾)
-        await self.client.write_gatt_char(UART_TX_CHAR_UUID, (command + '\r').encode('utf-8'))
-
+        
+        # 清空接收緩衝區
         try:
-            # 等待來自 _notification_handler 的回應
-            response = await asyncio.wait_for(self.response_queue.get(), timeout)
-            # 清理回應字串，移除原始指令和結尾的 '>'
-            cleaned_response = response.replace(command, "").replace(">", "").strip()
-            return cleaned_response
-        except asyncio.TimeoutError:
-            return f"ERROR: CMD '{command}' TIMEOUT"
+            while self.sock.recv(1024): pass
+        except bluetooth.btcommon.BluetoothError:
+            pass # 忽略超時，因為緩衝區可能本來就是空的
 
-    # --- 數據解析的私有方法 (與原版完全相同) ---
+        self.sock.send((command + '\r').encode('utf-8'))
+        
+        buffer = ""
+        while True:
+            try:
+                data = self.sock.recv(1024)
+                if not data:
+                    break
+                buffer += data.decode('utf-8', errors='ignore')
+                if '>' in buffer:
+                    break
+            except bluetooth.btcommon.BluetoothError as e:
+                if "timed out" in str(e):
+                    return "ERROR: TIMEOUT"
+                raise e
+        return buffer.strip()
+
+    # --- 數據解析的私有方法 ---
     def _parse_rpm(self, response: str) -> Optional[int]:
         parts = response.split()
         if len(parts) >= 4 and parts[0] == "41" and parts[1] == "0C":
@@ -153,30 +144,21 @@ class RealOBD:
         return None
 
     def _parse_voltage(self, response: str) -> Optional[float]:
-        parts = response.split()
-        if len(parts) >= 4 and parts[0] == "41" and parts[1] == "42":
-            try: return round(((int(parts[2], 16) * 256) + int(parts[3], 16)) / 1000.0, 2)
-            except: return None
-        return None
+        try:
+            return float(response.replace("V", ""))
+        except:
+            return None
 
     # --- 公開的主要方法 ---
-    async def get_obd_data(self) -> OBDData:
-        """
-        (非同步) 獲取核心儀表板數據，並打包成 OBDData 物件。
-        """
+    def get_obd_data(self) -> OBDData:
+        """獲取核心儀表板數據，並打包成 OBDData 物件。"""
         if not self.is_connected:
             return OBDData()
 
-        # 依序獲取並解析核心數據
-        rpm_response = await self._send_command(PID_RPM)
-        speed_response = await self._send_command(PID_SPEED)
-        temp_response = await self._send_command(PID_COOLANT_TEMP)
-        volt_response = await self._send_command(PID_MODULE_VOLTAGE)
-
-        rpm = self._parse_rpm(rpm_response)
-        speed = self._parse_speed(speed_response)
-        coolant_temp = self._parse_coolant_temp(temp_response)
-        battery_voltage = self._parse_voltage(volt_response)
+        rpm = self._parse_rpm(self._send_command(PID_RPM))
+        speed = self._parse_speed(self._send_command(PID_SPEED))
+        coolant_temp = self._parse_coolant_temp(self._send_command(PID_COOLANT_TEMP))
+        battery_voltage = self._parse_voltage(self._send_command(PID_MODULE_VOLTAGE))
 
         return OBDData(
             rpm=rpm,
@@ -186,69 +168,50 @@ class RealOBD:
         )
 
 # =================================================================
-# --- 獨立執行時的非同步測試區塊 (含性能測量) ---
+# ---               獨立執行時的測試區塊                          ---
 # =================================================================
-async def main_test():
-    """
-    用於獨立測試此模組的非同步主函式，並測量每次數據輪詢的耗時。
-    """
-    print("--- RealOBD (BLE) 獨立性能測試模式 ---")
-    TARGET_HZ = 5
-    TARGET_MS = 1000 / TARGET_HZ
+if __name__ == '__main__':
+    # 當此檔案被直接執行時，會運行以下測試程式碼。
+    # 這讓我們可以在不啟動完整 Web 伺服器的情況下，快速測試 OBD 連線。
     
-    obd_sensor = RealOBD(device_address=OBD_BLE_ADDRESS)
+    # --- 測試用的設定 ---
+    # 請在此處填寫您的 OBD 適配器 MAC 位址
+    TEST_DEVICE_ADDRESS = "66:1E:32:8A:55:2C"
+    
+    print("--- RealOBD (RFCOMM) 獨立測試模式 ---")
+    
+    # 建立 RealOBD 物件
+    obd_sensor = RealOBD(mac_address=TEST_DEVICE_ADDRESS)
+    
     try:
-        if await obd_sensor.connect():
-            print(f"\n--- 開始循環讀取數據 (目標: {TARGET_HZ} Hz / {TARGET_MS:.0f} ms)，按 Ctrl+C 結束 ---")
-            
-            total_time = 0
-            successful_polls = 0
-
-            for i in range(30): # 進行 30 次輪詢測試
+        # 嘗試連線並初始化
+        if obd_sensor.connect():
+            print("\n--- 開始循環讀取數據 (每秒一次)，按 Ctrl+C 結束 ---")
+            while True:
                 start_time = time.perf_counter()
                 
-                data = await obd_sensor.get_obd_data()
+                # 獲取數據
+                data = obd_sensor.get_obd_data()
                 
                 end_time = time.perf_counter()
                 duration_ms = (end_time - start_time) * 1000
                 
-                # 檢查數據是否有效
-                if data.rpm is not None or data.speed is not None:
-                    successful_polls += 1
-                    total_time += duration_ms
-
-                # 根據耗時決定狀態顯示
-                status = "✅ OK" if duration_ms <= TARGET_MS else "⚠️ SLOW"
-                
+                # 印出結果
                 print(
-                    f"輪詢 #{i+1:02d}: "
-                    f"耗時: {duration_ms:6.1f} ms [{status}] | "
+                    f"[{time.strftime('%H:%M:%S')}] "
+                    f"輪詢耗時: {duration_ms:6.1f} ms | "
                     f"RPM: {data.rpm}, Speed: {data.speed}, "
                     f"Temp: {data.coolant_temp}, Voltage: {data.battery_voltage}"
                 )
                 
-                # 為了不讓連續請求過於頻繁，在每次輪詢後稍微等待
-                await asyncio.sleep(0.3)
-            
-            # 測試結束後印出統計數據
-            if successful_polls > 0:
-                average_time = total_time / successful_polls
-                print("\n--- 測試總結 ---")
-                print(f"成功輪詢次數: {successful_polls} / 30")
-                print(f"平均輪詢耗時: {average_time:.1f} ms")
-                if average_time <= TARGET_MS:
-                    print(f"性能表現: ✅ 達標 (平均低於 {TARGET_MS:.0f} ms)")
-                else:
-                    print(f"性能表現: ❌ 未達標 (平均高於 {TARGET_MS:.0f} ms)")
+                # 控制輪詢頻率
+                time.sleep(1.0)
 
-    except Exception as e:
-        print(f"測試過程中發生錯誤: {e}")
-    finally:
-        print("正在關閉連線...")
-        await obd_sensor.disconnect()
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main_test())
     except KeyboardInterrupt:
         print("\n使用者手動中斷程式。")
+    except Exception as e:
+        print(f"\n測試過程中發生未預期的錯誤: {e}")
+    finally:
+        print("正在關閉連線...")
+        obd_sensor.disconnect()
+
