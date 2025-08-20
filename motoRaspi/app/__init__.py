@@ -23,8 +23,8 @@ from threading import Lock
 from itertools import groupby
 from statistics import mean
 
-# 假設 DMX 控制器邏輯被封裝在 dmx_controller.py 中
-# from dmx_controller import DMXController 
+# 假設 DMX 控制器邏輯被封裝在 DMX.py 中
+# from DMX import DMXController 
 from . import state
 from app.models import MotoData, EnvironmentalData, SystemStatus
 import config
