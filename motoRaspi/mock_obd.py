@@ -7,11 +7,12 @@
 import time
 import random
 from typing import Optional
+import logging
 
 try:
     from app.models import OBDData
 except ImportError:
-    print("[WARNING] 無法匯入 'app.models'。將使用內部模擬的 OBDData 類別。")
+    logging.warning("無法匯入 'app.models'。將使用內部模擬的 OBDData 類別。")
     class OBDData:
         def __init__(self, **kwargs): self.__dict__.update(kwargs)
         def __repr__(self): return f"OBDData({self.__dict__})"
@@ -32,16 +33,16 @@ class MockOBD:
 
     def connect(self) -> bool:
         """(同步) 模擬連線過程。"""
-        print("正在模擬連線到 OBD-II 適配器...")
+        logging.info("正在模擬連線到 OBD-II 適配器...")
         time.sleep(0.1)
         self.is_connected = True
-        print("模擬 OBD-II 適配器連線成功！")
+        logging.info("模擬 OBD-II 適配器連線成功！")
         return True
 
     def disconnect(self):
         """(同步) 模擬中斷連線。"""
         self.is_connected = False
-        print("模擬 OBD-II 連線已關閉。")
+        logging.warning("[!]模擬 OBD-II 連線已關閉。")
 
     def _update_ride_state(self):
         if time.time() - self.state_timer > random.uniform(3, 10):

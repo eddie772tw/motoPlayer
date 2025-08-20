@@ -9,6 +9,7 @@
 import bluetooth
 import time
 from typing import Optional
+import logging
 
 try:
     from app.models import OBDData
@@ -51,37 +52,37 @@ class RealOBD:
         """
         建立與 OBD-II 適配器的 RFCOMM Socket 連線，並執行初始化序列。
         """
-        print(f"正在嘗試連線到 {self.mac_address} 的 RFCOMM 頻道 {self.channel}...")
+        logging.info(f"正在嘗試連線到 {self.mac_address} 的 RFCOMM 頻道 {self.channel}...")
         try:
             self.sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
             self.sock.connect((self.mac_address, self.channel))
             self.sock.settimeout(5.0)
-            print("[+] RFCOMM Socket 連線成功！")
+            logging.info("RFCOMM Socket 連線成功！")
 
             # 執行初始化序列
-            print("[*] 正在執行 ELM327 初始化序列...")
+            logging.info("正在執行 ELM327 初始化序列...")
             for cmd in ELM327_INIT_SEQUENCE:
                 response = self._send_command(cmd)
                 print(f"  > {cmd:<5}... {response.splitlines()[0]}")
                 if "OK" not in response and "ELM" not in response:
-                    print(f"[!] 初始化指令 '{cmd}' 失敗，中止連線。")
+                    logging.error(f"初始化指令 '{cmd}' 失敗，中止連線。")
                     self.disconnect()
                     return False
                 time.sleep(0.1)
             
-            print("[*] 正在嘗試與 ECU 進行首次通訊 (0100)...")
+            logging.info("正在嘗試與 ECU 進行首次通訊 (0100)...")
             response = self._send_command("0100")
             if "NO DATA" in response or "ERROR" in response:
-                 print(f"[!] 無法與 ECU 建立通訊: {response.splitlines()[0]}")
+                 logging.error(f"無法與 ECU 建立通訊: {response.splitlines()[0]}")
                  self.disconnect()
                  return False
 
-            print("[+] ECU 通訊已建立！OBD 感測器準備就緒。")
+            logging.info("ECU 通訊已建立！OBD 感測器準備就緒。")
             self.is_connected = True
             return True
 
         except Exception as e:
-            print(f"[!] 連線或初始化失敗: {e}")
+            logging.error(f"[!] 連線或初始化失敗: {e}")
             self.disconnect()
             return False
 
@@ -91,7 +92,7 @@ class RealOBD:
             self.sock.close()
         self.sock = None
         self.is_connected = False
-        print("OBD-II (RFCOMM) 連線已關閉。")
+        logging.warning("OBD-II (RFCOMM) 連線已關閉。")
 
     def _send_command(self, command: str) -> str:
         """(私有方法) 發送指令並接收完整的回應。"""

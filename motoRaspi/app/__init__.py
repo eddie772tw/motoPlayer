@@ -1,9 +1,9 @@
-# app/__init__.py (v6.1 - Fixed & Integrated)
+# app/__init__.py (v6.2 - Corrected DMX Import)
 #
 # 版本更新說明:
 # - 此版本已完全還原為同步架構，以配合使用 PyBluez 的傳統藍牙 RFCOMM 方案。
 # - [FIX] 補上了所有遺漏的 import (logging, atexit, asyncio)。
-# - [FIX] 修正了 DMXController 的導入路徑，假設其位於 dmx_controller.py 中。
+# - [FIX] 修正了 DMXController 的導入路徑，從 "from DMX import DMXController"。
 # - [FIX] 調整了 create_app 函式的結構，將所有初始化邏輯移至函式開頭。
 # - [FIX] 修正了應用程式關閉時的 DMX 清理邏輯，避免同步/非同步衝突。
 
@@ -23,8 +23,8 @@ from threading import Lock
 from itertools import groupby
 from statistics import mean
 
-# 假設 DMX 控制器邏輯被封裝在 DMX.py 中
-# from DMX import DMXController 
+# [FIXED] 根據存放區的實際檔名 DMX.py 進行導入
+from DMX import DMXController 
 from . import state
 from app.models import MotoData, EnvironmentalData, SystemStatus
 import config
@@ -34,7 +34,8 @@ obd_sensor = None
 dmx_controller = None
 
 # --- 設定日誌 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
+logging.getLogger('apscheduler').setLevel(logging.ERROR)
 
 # --- 設定 ---
 NODEMCU_HOSTNAME = "motoplayer.local"
@@ -52,9 +53,9 @@ socketio = SocketIO()
 def find_mcu_ip():
     try:
         ip = socket.gethostbyname(NODEMCU_HOSTNAME)
-        if ip != state.mcu_ip_address: logging.info(f"[INFO] mDNS: '{NODEMCU_HOSTNAME}' -> {ip}"); state.mcu_ip_address = ip
+        if ip != state.mcu_ip_address: logging.info(f"mDNS: '{NODEMCU_HOSTNAME}' -> {ip}"); state.mcu_ip_address = ip
     except socket.gaierror:
-        if state.mcu_ip_address is not None: logging.warning(f"[WARNING] mDNS: 無法解析 '{NODEMCU_HOSTNAME}'。"); state.mcu_ip_address = None
+        if state.mcu_ip_address is not None: logging.warning(f"mDNS: 無法解析 '{NODEMCU_HOSTNAME}'。"); state.mcu_ip_address = None
 
 def fetch_obd_data():
     """(同步) 從 OBD 感測器獲取數據。"""
@@ -112,32 +113,31 @@ def create_app():
     if config.OBD_MODE == 'REAL':
         try:
             from real_obd import RealOBD
-            logging.info(f"--- [Sync] 使用真實OBD (RFCOMM) 模式 (位址: {config.OBD_DEVICE_ADDRESS}) ---")
+            logging.info(f"正在試圖與OBD診斷器( {config.OBD_DEVICE_ADDRESS})建立連線")
             obd_sensor = RealOBD(mac_address=config.OBD_DEVICE_ADDRESS, channel=config.RFCOMM_CHANNEL)
             if not obd_sensor.connect():
-                logging.warning("[WARNING] 無法連接到真實OBD感測器，將退回使用模擬器。")
+                logging.warning("無法連接到OBD感測器，使用模擬OBD模式。")
                 from mock_obd import MockOBD
                 obd_sensor = MockOBD()
                 obd_sensor.connect()
         except (ImportError, FileNotFoundError):
-            logging.error("[ERROR] 'real_obd.py' 或 'pybluez' 函式庫不存在，將退回使用模擬器。")
+            logging.error("'real_obd.py' 或 'pybluez' 函式庫不存在，將退回使用模擬器。")
             from mock_obd import MockOBD
             obd_sensor = MockOBD()
             obd_sensor.connect()
     else:
         from mock_obd import MockOBD
-        logging.info("--- [Sync] 使用模擬OBD模式 ---")
+        logging.info("使用模擬OBD模式")
         obd_sensor = MockOBD()
         obd_sensor.connect()
 
     # 初始化 DMX 控制器
-    # if config.DMX_MAC_ADDRESS and config.DMX_MAC_ADDRESS != "XX:XX:XX:XX:XX:XX":
-    #     dmx_controller = DMXController(config.DMX_MAC_ADDRESS)
-    #     # 注意：DMX 的 connect() 是非同步的，不應在此處直接呼叫
-    #     logging.info(f"DMX Controller for {config.DMX_MAC_ADDRESS} initialized.")
-    # else:
-    #     dmx_controller = None
-    #     logging.warning("DMX Controller address not set. DMX features will be disabled.")
+    if config.DMX_MAC_ADDRESS and config.DMX_MAC_ADDRESS != "XX:XX:XX:XX:XX:XX":
+        dmx_controller = DMXController(config.DMX_MAC_ADDRESS)
+        logging.info(f"DMX 控制器 {config.DMX_MAC_ADDRESS} 初始化完畢.")
+    else:
+        dmx_controller = None
+        logging.warning("DMX 控制器初始化失敗，停用中...")
 
     # --- 階段二: 設定背景排程任務 ---
     socketio.init_app(app)
@@ -159,14 +159,14 @@ def create_app():
         if obd_sensor:
             logging.info("App cleanup: Disconnecting from OBD sensor...")
             obd_sensor.disconnect()
-        # if dmx_controller and dmx_controller.is_connected:
-        #     logging.info("App cleanup: Disconnecting from DMX controller...")
-        #     try:
-        #         # 為了在同步的 atexit 中執行非同步函式，需要這樣一個包裝
-        #         loop = asyncio.get_event_loop()
-        #         loop.run_until_complete(dmx_controller.disconnect())
-        #     except Exception as e:
-        #         logging.error(f"Error during DMX disconnect on cleanup: {e}")
+        if dmx_controller and dmx_controller.is_connected:
+            logging.info("App cleanup: Disconnecting from DMX controller...")
+            try:
+                # 為了在同步的 atexit 中執行非同步函式，需要這樣一個包裝
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(dmx_controller.disconnect())
+            except Exception as e:
+                logging.error(f"Error during DMX disconnect on cleanup: {e}")
 
     atexit.register(cleanup)
     
