@@ -1,5 +1,7 @@
 # app/routes.py
 
+import asyncio
+import logging
 import sqlite3
 import math
 import requests
@@ -7,13 +9,17 @@ import io
 import csv
 import os
 import pandas as pd
+from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 from flask import Blueprint, jsonify, request, render_template, Response, flash, redirect, url_for
 from . import state
-from datetime import datetime, timedelta
+from . import socketio
+from . import dmx_controller
 
-DATABASE_PATH = "motoplayer.db"
 bp = Blueprint('main', __name__)
+logger = logging.getLogger(__name__)
+DATABASE_PATH = "motoplayer.db"
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
 
 def get_db_connection():
     """建立並回傳一個資料庫連線物件。"""
@@ -29,6 +35,56 @@ def calculate_feels_like(temp_c, humidity, speed_kmh):
     apparent_temp = temp_c + (0.33 * vapor_pressure) - (0.70 * wind_speed_ms) - 4.00
     return round(apparent_temp, 1)
 
+def _handle_dmx_command(command, param):
+    """
+    專門處理所有 DMX 相關指令的內部函式。
+    """
+    if not dmx_controller:
+        logger.error("DMX 指令無法執行，因為控制器未設定。")
+        return jsonify({"status": "error", "message": "DMX controller not configured."}), 501
+
+    if command == "rgb_set_color":
+        r, g, b = int(param['r']), int(param['g']), int(param['b'])
+        asyncio.run(dmx_controller.set_static_color(r, g, b))
+        state.shared_state['dmx_status'].update({'power': True, 'color': f'#{r:02x}{g:02x}{b:02x}'})
+        socketio.emit('dmx_update', state.shared_state['dmx_status'])
+        return jsonify({"status": "success", "message": "DMX color set."})
+
+    elif command == "rgb_set_brightness":
+        brightness = int(param)
+        asyncio.run(dmx_controller.set_brightness(brightness))
+        state.shared_state['dmx_status'].update({'power': True, 'brightness': brightness})
+        socketio.emit('dmx_update', state.shared_state['dmx_status'])
+        return jsonify({"status": "success", "message": "DMX brightness set."})
+
+    elif command == "rgb_set_mode":
+        mode = int(param)
+        asyncio.run(dmx_controller.set_mode(mode))
+        state.shared_state['dmx_status'].update({'power': True, 'mode': mode})
+        socketio.emit('dmx_update', state.shared_state['dmx_status'])
+        return jsonify({"status": "success", "message": "DMX mode set."})
+
+    elif command == "rgb_set_speed":
+        speed = int(param)
+        asyncio.run(dmx_controller.set_speed(speed))
+        state.shared_state['dmx_status']['speed'] = speed
+        socketio.emit('dmx_update', state.shared_state['dmx_status'])
+        return jsonify({"status": "success", "message": "DMX speed set."})
+
+    elif command == "rgb_on":
+        asyncio.run(dmx_controller.set_power(True))
+        state.shared_state['dmx_status']['power'] = True
+        socketio.emit('dmx_update', state.shared_state['dmx_status'])
+        return jsonify({"status": "success", "message": "DMX turned on."})
+
+    elif command == "rgb_off":
+        asyncio.run(dmx_controller.set_power(False))
+        state.shared_state['dmx_status']['power'] = False
+        socketio.emit('dmx_update', state.shared_state['dmx_status'])
+        return jsonify({"status": "success", "message": "DMX turned off."})
+    
+    return None # 表示非 DMX 指令或未知的 DMX 指令
+
 ALLOWED_EXTENSIONS = {'csv'}
 
 def allowed_file(filename):
@@ -36,7 +92,6 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- 全新的欄位對應字典，專為「寬格式」CSV 設計 ---
 COLUMN_MAPPING = {
     '发动机转速 (rpm)': 'rpm',
     '速度 (GPS) (km/h)': 'speed',
@@ -190,21 +245,51 @@ def upload_log():
 
 @bp.route("/api/command", methods=['POST'])
 def handle_command():
-    if not state.mcu_ip_address: return jsonify({"status": "error", "message": "NodeMCU is currently offline."}), 503
-    data = request.get_json();
-    if not data or 'command' not in data: return jsonify({"status": "error", "message": "Invalid JSON request body."}), 400
-    command = data.get('command'); param = data.get('param')
-    command_map = {"vol_up": "/api/vol_up", "vol_down": "/api/vol_down", "restart": "/api/restart"}
-    target_url = None; base_url = f"http://{state.mcu_ip_address}"
-    if command in command_map: target_url = base_url + command_map[command]
-    elif command == "play" and param is not None: target_url = f"{base_url}/api/play?track={param}"
-    else: return jsonify({"status": "error", "message": f"Unknown or invalid command: '{command}'"}), 400
+    """
+    統一的指令處理與分派端點。
+    """
+    data = request.get_json()
+    if not data or 'command' not in data:
+        return jsonify({"status": "error", "message": "Invalid JSON request body."}), 400
+
+    command = data.get('command')
+    param = data.get('param')
+    logger.info(f"收到指令: {command}, 參數: {param}")
+
     try:
-        print(f"[COMMAND API] Forwarding command '{command}' to {target_url}")
-        response = requests.get(target_url, timeout=3); response.raise_for_status()
-        return jsonify({"status": "success", "command_sent": command, "nodemcu_response": response.text}), 200
+        # 步驟 1: 嘗試作為 DMX 指令處理
+        if command.startswith("rgb_"):
+            dmx_response = _handle_dmx_command(command, param)
+            if dmx_response:
+                return dmx_response
+
+        # 步驟 2: 如果不是 DMX 指令，則嘗試作為 NodeMCU 指令處理
+        if state.mcu_ip_address:
+            command_map = {"vol_up": "/api/vol_up", "vol_down": "/api/vol_down", "restart": "/api/restart"}
+            target_url = None
+            base_url = f"http://{state.mcu_ip_address}"
+
+            if command in command_map:
+                target_url = base_url + command_map[command]
+            elif command == "play" and param is not None:
+                target_url = f"{base_url}/api/play?track={param}"
+            
+            if target_url:
+                logger.info(f"[COMMAND] 正在轉發指令 '{command}' 到 {target_url}")
+                response = requests.get(target_url, timeout=3)
+                response.raise_for_status()
+                return jsonify({"status": "success", "command_sent": command, "nodemcu_response": response.text}), 200
+
+        # 步驟 3: 如果以上都不是，則回報未知指令
+        logger.warning(f"收到了未知的指令: '{command}' 或目標設備離線。")
+        return jsonify({"status": "error", "message": f"Unknown command or target device offline: '{command}'"}), 404
+
     except requests.exceptions.RequestException as e:
-        print(f"[COMMAND API ERROR] Failed to send command to NodeMCU: {e}"); return jsonify({"status": "error", "message": "Failed to communicate with NodeMCU."}), 504
+        logger.error(f"[COMMAND ERROR] 無法傳送指令到 NodeMCU: {e}")
+        return jsonify({"status": "error", "message": "Failed to communicate with NodeMCU."}), 504
+    except Exception as e:
+        logger.error(f"處理指令 '{command}' 時發生嚴重錯誤: {e}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @bp.route("/api/trip/<int:trip_id>", methods=['DELETE'])
 def delete_trip(trip_id):
