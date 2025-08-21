@@ -12,8 +12,6 @@ from flask import Flask
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
 from DMX import DMXController
-from . import tasks
-from . import state
 import config
 
 # --- 全域變數 ---
@@ -31,6 +29,8 @@ socketio = SocketIO(cors_allowed_origins="*")
 apscheduler = APScheduler()
 
 def create_app():
+    from . import tasks
+    from . import state
     global obd_sensor, dmx_controller
     app = Flask(__name__)
     app.config.from_object(config.Config)
