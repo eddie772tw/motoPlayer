@@ -50,7 +50,7 @@ def create_dmx_speed_command(speed: int) -> bytearray:
 
 # ----------------------------------------------------
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
 
 async def main():
     logging.info(f"[*] 正在嘗試連接到 DMX 控制器: {DEVICE_ADDRESS}...")
