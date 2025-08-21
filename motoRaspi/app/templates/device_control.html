@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設備控制</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/font.css') }}">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-200">
+    <div class="container mx-auto p-4 md:p-6 lg:p-8">
+        <header class="mb-6 flex justify-between items-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-white">設備控制</h1>
+            <a href="/" class="px-4 py-2 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 transition-colors">
+                返回主頁
+            </a>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- DMX Control Panel -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg space-y-4">
+                <h2 class="text-2xl font-bold text-purple-400 mb-4">DMX 燈光控制</h2>
+
+                <div class="flex items-center justify-between">
+                    <label for="dmx-power" class="font-semibold">燈光開關</label>
+                    <div>
+                        <button onclick="sendCommand('rgb_on')" class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors">開啟</button>
+                        <button onclick="sendCommand('rgb_off')" class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors">關閉</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <label for="dmx-color" class="font-semibold">靜態顏色</label>
+                    <input type="color" id="dmx-color" onchange="setColor(this.value)" class="p-1 h-10 w-16 bg-gray-700 rounded-lg cursor-pointer">
+                </div>
+
+                <div>
+                    <label for="dmx-brightness" class="font-semibold block mb-2">亮度</label>
+                    <input type="range" id="dmx-brightness" min="0" max="255" value="255" oninput="sendCommand('rgb_set_brightness', this.value)" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+
+                <div>
+                    <label for="dmx-mode" class="font-semibold block mb-2">動態模式</label>
+                    <select id="dmx-mode" onchange="sendCommand('rgb_set_mode', this.value)" class="w-full p-2 bg-gray-700 rounded-lg">
+                        <option value="0">靜態</option>
+                        <option value="1">呼吸</option>
+                        <option value="2">頻閃</option>
+                        <option value="3">彩虹</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="dmx-speed" class="font-semibold block mb-2">模式速度</label>
+                    <input type="range" id="dmx-speed" min="0" max="255" value="128" oninput="sendCommand('rgb_set_speed', this.value)" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                </div>
+            </div>
+
+            <!-- NodeMCU Control Panel -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg space-y-4">
+                <h2 class="text-2xl font-bold text-yellow-400 mb-4">NodeMCU 音樂播放器控制</h2>
+
+                <div class="flex items-center justify-between">
+                    <label class="font-semibold">音量控制</label>
+                    <div>
+                        <button onclick="sendCommand('vol_down')" class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">降低</button>
+                        <button onclick="sendCommand('vol_up')" class="px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">提高</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <label for="track-id" class="font-semibold">播放指定曲目</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="track-id" placeholder="曲目ID" class="w-24 p-2 bg-gray-700 rounded-lg">
+                        <button onclick="playTrack()" class="px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors">播放</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <label class="font-semibold">系統指令</label>
+                    <button onclick="sendCommand('restart')" class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors">重啟播放器</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        async function sendCommand(command, param = null) {
+            try {
+                const response = await fetch('/api/command', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ command, param }),
+                });
+                const result = await response.json();
+                console.log('Command sent:', { command, param }, 'Response:', result);
+                // Optionally, provide user feedback here
+            } catch (error) {
+                console.error('Failed to send command:', error);
+                // Optionally, provide user feedback here
+            }
+        }
+
+        function setColor(hex) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            sendCommand('rgb_set_color', { r, g, b });
+        }
+
+        function playTrack() {
+            const trackId = document.getElementById('track-id').value;
+            if (trackId) {
+                sendCommand('play', trackId);
+            }
+        }
+    </script>
+</body>
+</html>

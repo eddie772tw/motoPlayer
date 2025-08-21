@@ -122,6 +122,11 @@ def trip_detail(trip_id):
     return render_template('trip_detail.html', trip_id=trip_id)
 
 
+@bp.route("/device_control")
+def device_control():
+    return render_template('device_control.html')
+
+
 @bp.route("/api/realtime_data")
 def get_realtime_data():
     latest_data = None;
