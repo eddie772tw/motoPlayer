@@ -58,5 +58,5 @@ async def main():
         print("Disconnected.")
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
     asyncio.run(main())
