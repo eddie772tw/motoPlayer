@@ -11,8 +11,7 @@ import asyncio
 from flask import Flask
 from flask_socketio import SocketIO
 from flask_apscheduler import APScheduler
-from DMX import DMXController 
-from . import routes
+from DMX import DMXController
 from . import tasks
 from . import state
 import config
@@ -78,6 +77,7 @@ def create_app():
         logger.info("多執行緒背景服務已啟動。")
 
     # --- 階段三: 註冊路由與清理函式 ---
+    from . import routes
     app.register_blueprint(routes.bp)
 
     # 定義應用程式關閉時的清理工作
