@@ -1,23 +1,18 @@
 # real_obd.py (RFCOMM Final)
 #
-# 版本: 6.5 (Clean Logging)
-# 描述: 此版本已重構，移除了所有內部的解析邏輯，
-#      改為呼叫外部的 obd_converter 模組來處理數據轉換。
-#      將所有 print() 語句替換為標準的 logging 模組。
-#      [NEW] 移除了日誌訊息中的 [*], [+] 等標籤，使輸出更簡潔。
+# 版本: 6.8 (Standardized Logging)
+# 描述: [MODIFIED] 將日誌格式統一為 '[%(levelname)s][%(asctime)s]%(message)s'。
 
 import bluetooth
 import time
 import logging
 from typing import Optional
 
-# [MODIFIED] 導入新的轉換模組
 from obd_converter import decode_pid_response
 
 try:
     from app.models import OBDData
 except ImportError:
-    # 在獨立執行時，這個警告是正常的
     logging.warning("無法匯入 'app.models'。將使用內部模擬的 OBDData 類別。")
     class OBDData:
         def __init__(self, **kwargs): self.__dict__.update(kwargs)
@@ -27,22 +22,20 @@ except ImportError:
 # ---               ELM327 指令集 (Constants)                   ---
 # =================================================================
 
-ELM327_INIT_SEQUENCE = [
+ELM327_BASE_INIT = [
     "ATZ",
     "ATE0",
     "ATL0",
     "ATH0",
-    "ATSP5",
 ]
 
-# [MODIFIED] 擴充我們想要輪詢的 PID 列表
 PIDS_TO_QUERY = {
     "rpm": "010C",
     "speed": "010D",
     "coolant_temp": "0105",
     "engine_load": "0104",
     "throttle_pos": "0111",
-    "battery_voltage": "ATRV", # 特殊 AT 指令
+    "battery_voltage": "ATRV",
 }
 
 class RealOBD:
@@ -60,25 +53,37 @@ class RealOBD:
         try:
             self.sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
             self.sock.connect((self.mac_address, self.channel))
-            self.sock.settimeout(5.0)
+            self.sock.settimeout(2.0)
             logging.info("RFCOMM Socket 連線成功！")
 
-            logging.info("正在執行 ELM327 初始化序列...")
-            for cmd in ELM327_INIT_SEQUENCE:
+            logging.info("正在執行基礎 ELM327 初始化...")
+            for cmd in ELM327_BASE_INIT:
                 response = self._send_command(cmd)
                 logging.info(f"  > {cmd:<5}... {response.splitlines()[0]}")
                 if "OK" not in response and "ELM" not in response:
-                    logging.error(f"初始化指令 '{cmd}' 失敗，中止連線。")
+                    logging.error(f"基礎初始化指令 '{cmd}' 失敗，中止連線。")
                     self.disconnect()
                     return False
                 time.sleep(0.1)
             
-            logging.info("正在嘗試與 ECU 進行首次通訊 (0100)...")
+            logging.info("正在嘗試與 ECU 建立通訊...")
+
+            logging.info("第一步：嘗試使用指定的協議 (ATSP5)...")
+            self._send_command("ATSP5")
             response = self._send_command("0100")
-            if "NO DATA" in response or "ERROR" in response:
-                 logging.error(f"無法與 ECU 建立通訊: {response.splitlines()[0]}")
-                 self.disconnect()
-                 return False
+
+            if "NO DATA" not in response and "ERROR" not in response:
+                logging.info("協議 ATSP5 連線成功！")
+            else:
+                logging.warning("使用 ATSP5 與 ECU 通訊失敗，正在回退到自動協議 (ATSP0)...")
+                self._send_command("ATSP0")
+                response = self._send_command("0100")
+
+                if "NO DATA" in response or "ERROR" in response:
+                    logging.error(f"使用自動協議 ATSP0 仍然無法與 ECU 建立通訊: {response.splitlines()[0]}")
+                    self.disconnect()
+                    return False
+                logging.info("協議 ATSP0 連線成功！")
 
             logging.info("ECU 通訊已建立！OBD 感測器準備就緒。")
             self.is_connected = True
@@ -100,10 +105,13 @@ class RealOBD:
         if not self.sock:
             return "ERROR: NOT CONNECTED"
         
+        self.sock.setblocking(False)
         try:
-            while self.sock.recv(1024): pass
+            while True:
+                self.sock.recv(1024)
         except bluetooth.btcommon.BluetoothError:
             pass
+        self.sock.setblocking(True)
 
         self.sock.send((command + '\r').encode('utf-8'))
         
@@ -123,14 +131,12 @@ class RealOBD:
         return buffer.strip()
 
     def _parse_voltage(self, response: str) -> Optional[float]:
-        """處理 ATRV 指令的特殊解析函式"""
         try:
             return float(response.replace("V", ""))
         except:
             return None
 
     def get_obd_data(self) -> OBDData:
-        """獲取核心儀表板數據，並打包成 OBDData 物件。"""
         if not self.is_connected:
             return OBDData()
 
@@ -146,7 +152,7 @@ class RealOBD:
         return OBDData(**results)
 
 if __name__ == '__main__':
-    # --- 獨立執行時的日誌設定 ---
+    # [MODIFIED] 更新日誌格式
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
     
     TEST_DEVICE_ADDRESS = "66:1E:32:8A:55:2C"
@@ -164,9 +170,20 @@ if __name__ == '__main__':
                 end_time = time.perf_counter()
                 duration_ms = (end_time - start_time) * 1000
                 
-                # 使用 logging.info 來印出結構化的數據
-                log_message = (f"耗時: {duration_ms:6.1f} ms | RPM: {data.rpm} | Speed: {data.speed} | Temp: {data.coolant_temp} | Volt: {data.battery_voltage} | Load: {data.engine_load}% | Throttle: {data.throttle_pos}%")
-                logging.info(log_message)
+                log_message = (
+                    f"Time:{duration_ms:6.1f}ms | "
+                    f"RPM:{data.rpm or 'N/A'} | "
+                    f"Speed:{data.speed or 'N/A'} | "
+                    f"Temp:{data.coolant_temp or 'N/A'} | "
+                    f"Volt:{data.battery_voltage or 'N/A'} | "
+                    f"Load:{data.engine_load or 'N/A'}% | "
+                    f"Throttle:{data.throttle_pos or 'N/A'}%"
+                )
+                
+                if duration_ms > 200:
+                    logging.warning(f"SLOW POLLING! {log_message}")
+                else:
+                    logging.info(log_message)
                 
                 time.sleep(1.0)
 
