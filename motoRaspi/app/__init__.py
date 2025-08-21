@@ -29,11 +29,11 @@ socketio = SocketIO(cors_allowed_origins="*")
 apscheduler = APScheduler()
 
 def create_app():
-    from . import tasks
+    # from . import tasks
     from . import state
     global obd_sensor, dmx_controller
     app = Flask(__name__)
-    app.config.from_object(config.Config)
+    app.config.from_object(config)
 
     # --- 階段一: 初始化感測器與控制器 ---
     
@@ -67,14 +67,14 @@ def create_app():
     # --- 階段二: 設定背景排程任務 ---
     socketio.init_app(app)
     
-    if not apscheduler.running:
-        apscheduler.init_app(app)
-        apscheduler.add_job(id='FetchOBDJob', func=tasks.fetch_obd_data, args=[obd_sensor], trigger='interval', seconds=config.OBD_FETCH_INTERVAL_MS / 1000)
-        apscheduler.add_job(id='FetchNodeMCUJob', func=tasks.fetch_nodemcu_data, trigger='interval', seconds=config.NODEMCU_FETCH_INTERVAL_S)
-        apscheduler.add_job(id='PushWebSocketJob', func=tasks.push_data_via_websocket, trigger='interval', seconds=config.WEBSOCKET_PUSH_INTERVAL_MS / 1000)
-        apscheduler.add_job(id='WriteDBJob', func=tasks.write_buffer_to_db, trigger='interval', seconds=config.DB_WRITE_INTERVAL_S)
-        apscheduler.start()
-        logger.info("多執行緒背景服務已啟動。")
+    # if not apscheduler.running:
+    #     apscheduler.init_app(app)
+    #     apscheduler.add_job(id='FetchOBDJob', func=tasks.fetch_obd_data, args=[obd_sensor], trigger='interval', seconds=config.OBD_FETCH_INTERVAL_MS / 1000)
+    #     apscheduler.add_job(id='FetchNodeMCUJob', func=tasks.fetch_nodemcu_data, trigger='interval', seconds=config.NODEMCU_FETCH_INTERVAL_S)
+    #     apscheduler.add_job(id='PushWebSocketJob', func=tasks.push_data_via_websocket, trigger='interval', seconds=config.WEBSOCKET_PUSH_INTERVAL_MS / 1000)
+    #     apscheduler.add_job(id='WriteDBJob', func=tasks.write_buffer_to_db, trigger='interval', seconds=config.DB_WRITE_INTERVAL_S)
+    #     apscheduler.start()
+    #     logger.info("多執行緒背景服務已啟動。")
 
     # --- 階段三: 註冊路由與清理函式 ---
     from . import routes
