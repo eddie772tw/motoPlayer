@@ -98,9 +98,6 @@ def write_buffer_to_db():
     with state.db_buffer_lock:
         if not state.db_write_buffer: return
         local_buffer_copy = state.db_write_buffer.copy(); state.db_write_buffer.clear()
-    
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 執行批次寫入，共收到 {len(local_buffer_copy)} 筆原始數據。")
-    
     aggregated_records = []
     avg_fields = [
         'temperature', 'humidity', 'light_level', 'rpm', 'speed', 'coolant_temp', 
@@ -129,7 +126,7 @@ def write_buffer_to_db():
         
         aggregated_records.append(MotoData.model_validate(agg_record))
 
-    print(f"聚合後，將寫入 {len(aggregated_records)} 筆精簡數據。")
+    logging.info(f"收到 {len(local_buffer_copy)} 筆原始數據，寫入{len(aggregated_records)} 筆精簡數據。")
     
     try:
         now = datetime.now()
@@ -137,7 +134,7 @@ def write_buffer_to_db():
             state.current_trip_id = None
         if state.current_trip_id is None:
             state.current_trip_id = int(now.timestamp())
-            print(f"============== New Trip Started: {state.current_trip_id} ==============")
+            logging.info(f" New Trip Started: {state.current_trip_id} ")
 
         records_to_insert = [
             (
@@ -167,7 +164,7 @@ def write_buffer_to_db():
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[WRITE DB ERROR] {e}")
+        logging.ERROR(f"WRITE DB ERROR: {e}")
 
 def create_app():
     global obd_sensor, dmx_controller
