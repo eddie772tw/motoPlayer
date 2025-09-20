@@ -3,6 +3,7 @@ import asyncio
 import argparse
 import logging
 from DMX import DMXController
+from DMX_test import DEVICE_ADDRESS as DEFAULT_DMX_ADDRESS
 
 async def control_device(mac_address, args):
     """
@@ -47,7 +48,7 @@ async def control_device(mac_address, args):
 
 async def main():
     parser = argparse.ArgumentParser(description="DMX BLE Controller CLI")
-    parser.add_argument('--macs', nargs='+', required=True, help='One or more DMX controller MAC addresses')
+    parser.add_argument('--macs', nargs='+', default=None, help='One or more DMX controller MAC addresses. Defaults to the address in DMX_test.py if not provided.')
     parser.add_argument('--color', nargs=3, type=int, metavar=('R', 'G', 'B'), help='Set static color (e.g., --color 255 0 0)')
     parser.add_argument('--brightness', type=int, metavar='B', help='Set brightness (0-100)')
     parser.add_argument('--mode', type=int, metavar='M', help='Set dynamic mode (e.g., --mode 3)')
@@ -56,9 +57,16 @@ async def main():
     parser.add_argument('--off', action='store_true', help='Turn the light off')
     args = parser.parse_args()
 
+    mac_addresses = args.macs
+    if mac_addresses is None:
+        print(f"No MAC addresses provided. Using default from DMX_test.py: {DEFAULT_DMX_ADDRESS}")
+        mac_addresses = [DEFAULT_DMX_ADDRESS]
+
     # Create a copy of args and remove 'macs' to check if any other command is present
     command_args = vars(args).copy()
-    del command_args['macs']
+    # macs might not be in command_args if default is used, so we check
+    if 'macs' in command_args:
+        del command_args['macs']
 
     # Filter out None values to correctly check for presence of commands
     if not any(v is not None and v is not False for v in command_args.values()):
@@ -66,7 +74,7 @@ async def main():
         parser.print_help()
         return
 
-    tasks = [control_device(mac, args) for mac in args.macs]
+    tasks = [control_device(mac, args) for mac in mac_addresses]
     await asyncio.gather(*tasks)
 
 
