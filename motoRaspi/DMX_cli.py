@@ -28,12 +28,12 @@ async def main():
     connected_controllers = []
     for controller in controllers:
         try:
-            print(f"Connecting to {controller.address}...")
+            print(f"Connecting to {controller._device_address}...")
             await controller.connect()
-            print(f"Connected successfully to {controller.address}!")
+            print(f"Connected successfully to {controller._device_address}!")
             connected_controllers.append(controller)
         except Exception as e:
-            print(f"Failed to connect to {controller.address}: {e}")
+            print(f"Failed to connect to {controller._device_address}: {e}")
 
     if not connected_controllers:
         print("No devices could be connected. Exiting.")
@@ -111,9 +111,9 @@ async def main():
     finally:
         for controller in connected_controllers:
             if controller.is_connected:
-                print(f"Disconnecting from {controller.address}...")
+                print(f"Disconnecting from {controller._device_address}...")
                 await controller.disconnect()
-                print(f"Disconnected from {controller.address}.")
+                print(f"Disconnected from {controller._device_address}.")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
