@@ -25,15 +25,21 @@ async def main():
 
     controllers = [DMXController(addr) for addr in mac_addresses]
 
-    connected_controllers = []
-    for controller in controllers:
+    async def connect_controller(controller):
+        """Helper to connect to a single controller and handle errors."""
         try:
             print(f"Connecting to {controller._device_address}...")
             await controller.connect()
             print(f"Connected successfully to {controller._device_address}!")
-            connected_controllers.append(controller)
+            return controller
         except Exception as e:
             print(f"Failed to connect to {controller._device_address}: {e}")
+            return None
+
+    # Concurrently connect to all devices
+    connect_tasks = [connect_controller(c) for c in controllers]
+    results = await asyncio.gather(*connect_tasks)
+    connected_controllers = [c for c in results if c is not None]
 
     if not connected_controllers:
         print("No devices could be connected. Exiting.")
@@ -56,43 +62,46 @@ async def main():
                     break
                 elif command == "help":
                     print_help()
-                elif command == "on":
-                    for controller in connected_controllers:
-                        await controller.set_power(True)
+                    continue
+
+                tasks = []
+                if command == "on":
+                    tasks = [c.set_power(True) for c in connected_controllers]
+                    await asyncio.gather(*tasks)
                     print("Light turned on for all devices.")
                 elif command == "off":
-                    for controller in connected_controllers:
-                        await controller.set_power(False)
+                    tasks = [c.set_power(False) for c in connected_controllers]
+                    await asyncio.gather(*tasks)
                     print("Light turned off for all devices.")
                 elif command == "brightness":
                     if len(parts) == 2 and parts[1].isdigit():
                         val = int(parts[1])
-                        for controller in connected_controllers:
-                            await controller.set_brightness(val)
+                        tasks = [c.set_brightness(val) for c in connected_controllers]
+                        await asyncio.gather(*tasks)
                         print(f"Brightness set to {val}% for all devices.")
                     else:
                         print("Invalid brightness command. Usage: brightness <value>")
                 elif command == "speed":
                     if len(parts) == 2 and parts[1].isdigit():
                         val = int(parts[1])
-                        for controller in connected_controllers:
-                            await controller.set_speed(val)
+                        tasks = [c.set_speed(val) for c in connected_controllers]
+                        await asyncio.gather(*tasks)
                         print(f"Speed set to {val}% for all devices.")
                     else:
                         print("Invalid speed command. Usage: speed <value>")
                 elif command == "mode":
                     if len(parts) == 2 and parts[1].isdigit():
                         val = int(parts[1])
-                        for controller in connected_controllers:
-                            await controller.set_mode(val)
+                        tasks = [c.set_mode(val) for c in connected_controllers]
+                        await asyncio.gather(*tasks)
                         print(f"Mode set to {val} for all devices.")
                     else:
                         print("Invalid mode command. Usage: mode <value>")
                 elif command == "color":
                     if len(parts) == 4 and all(p.isdigit() for p in parts[1:]):
                         r, g, b = map(int, parts[1:])
-                        for controller in connected_controllers:
-                            await controller.set_static_color(r, g, b)
+                        tasks = [c.set_static_color(r, g, b) for c in connected_controllers]
+                        await asyncio.gather(*tasks)
                         print(f"Color set to R={r}, G={g}, B={b} for all devices.")
                     else:
                         print("Invalid color command. Usage: color <r> <g> <b>")
@@ -109,11 +118,17 @@ async def main():
     except Exception as e:
         print(f"An error occurred during the process: {e}")
     finally:
-        for controller in connected_controllers:
-            if controller.is_connected:
-                print(f"Disconnecting from {controller._device_address}...")
-                await controller.disconnect()
-                print(f"Disconnected from {controller._device_address}.")
+        if connected_controllers:
+            print("Disconnecting all connected devices...")
+
+            async def disconnect_with_log(controller):
+                if controller.is_connected:
+                    print(f"Disconnecting from {controller._device_address}...")
+                    await controller.disconnect()
+                    print(f"Disconnected from {controller._device_address}.")
+
+            tasks = [disconnect_with_log(c) for c in connected_controllers]
+            await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
