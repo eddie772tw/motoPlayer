@@ -56,23 +56,28 @@ def create_dmx_speed_command(speed: int) -> bytearray:
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s][%(asctime)s]%(message)s')
 
-async def main():
-    logging.info(f"[*] 正在嘗試連接到 DMX 控制器: {DEVICE_ADDRESS}...")
+async def test_device(address: str):
+    """
+    連接到指定的 DMX 控制器並執行完整的測試序列。
+    """
+    logging.info(f"[*] 正在嘗試連接到 DMX 控制器: {address}...")
     try:
-        async with BleakClient(DEVICE_ADDRESS) as client:
+        # 增加 timeout 參數以避免長時間等待無響應的設備
+        async with BleakClient(address, timeout=10.0) as client:
             if not client.is_connected:
-                logging.error("[!] 連接失敗。")
+                # 這個判斷理論上在 `async with` 成功後不會觸發，但作為雙重保險
+                logging.error(f"[!] 連接至 {address} 失敗。")
                 return
 
-            logging.info("[+] 連接成功！準備執行進階指令序列...")
+            logging.info(f"[+] 成功連接到 {address}！準備執行指令序列...")
             await asyncio.sleep(1)
 
-            # --- 進階測試序列 ---
+            # --- 測試序列 ---
 
-            # 1. 設定顏色為藍色
-            cmd_blue = create_dmx_rgb_command(r=0, g=0, b=255)
-            logging.info(f"[*] 1. 發送藍燈指令: {cmd_blue.hex()}")
-            await client.write_gatt_char(CHARACTERISTIC_UUID, cmd_blue, response=False)
+            # 1. 設定顏色為 #7f4448
+            cmd_color = create_dmx_rgb_command(r=127, g=68, b=72)
+            logging.info(f"[*] 1. 發送顏色指令 ({cmd_color.hex()})")
+            await client.write_gatt_char(CHARACTERISTIC_UUID, cmd_color, response=False)
             await asyncio.sleep(2)
 
             # 2. 將亮度調暗至 20%
@@ -87,7 +92,7 @@ async def main():
             await client.write_gatt_char(CHARACTERISTIC_UUID, cmd_bright_high, response=False)
             await asyncio.sleep(2)
 
-            # 4. 切換到動態模式 1 (通常是七彩漸變之類的效果)
+            # 4. 切換到動態模式 1 (七彩漸變)
             cmd_mode_1 = create_dmx_mode_command(mode=1)
             logging.info(f"[*] 4. 切換到動態模式 1: {cmd_mode_1.hex()}")
             await client.write_gatt_char(CHARACTERISTIC_UUID, cmd_mode_1, response=False)
@@ -104,10 +109,31 @@ async def main():
             cmd_off = create_dmx_power_command(is_on=False)
             logging.info(f"[*] 6. 發送關燈指令: {cmd_off.hex()}")
             await client.write_gatt_char(CHARACTERISTIC_UUID, cmd_off, response=False)
+            await asyncio.sleep(1) # 確保指令有足夠時間發送
 
+            logging.info(f"[+] {address} 的測試序列執行完畢。")
+
+    except BleakError as e:
+        logging.error(f"[!] 連接至 {address} 時發生 Bleak 錯誤: {e}")
     except Exception as e:
-        logging.error(f"[!] 發生錯誤: {e}")
+        # 捕捉其他潛在錯誤，例如指令產生或異步操作中的問題
+        logging.error(f"[!] 處理 {address} 時發生未預期錯誤: {e}")
+
+
+async def main():
+    """
+    創建所有設備的測試任務並發執行它們。
+    """
+    logging.info("[*] 開始執行 DMX 控制器多設備並發測試...")
+    # 為每個設備地址創建一個測試任務
+    tasks = [test_device(address) for address in DEVICE_ADDRESS]
+    # 使用 asyncio.gather 來並發執行所有任務
+    await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    logging.info("[*] 進階測試腳本執行完畢。")
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("\n[*] 測試被使用者中斷。")
+    finally:
+        logging.info("[*] 所有設備的並發測試流程已結束。")
