@@ -19,7 +19,7 @@ async def main():
     """Main function to run the interactive CLI."""
     mac_addresses_input = input(f"Enter DMX controller MAC addresses (comma-separated, or press Enter to use default: {DEFAULT_DMX_ADDRESS}): ").strip()
     if not mac_addresses_input:
-        mac_addresses = [DEFAULT_DMX_ADDRESS]
+        mac_addresses = DEFAULT_DMX_ADDRESS
     else:
         mac_addresses = [addr.strip() for addr in mac_addresses_input.split(',')]
 
