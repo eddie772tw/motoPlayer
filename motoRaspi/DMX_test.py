@@ -12,7 +12,7 @@ from bleak import BleakClient, BleakError
 # ----------------------------------------------------
 DEVICE_ADDRESS = [
     "24:07:03:60:E0:68",
-    "24:07:03:50:1E:20"
+    "24:07:03:50:B1:20"
 ]
 # DEVICE_ADDRESS = "24:07:03:60:E0:68"  # 請替換成您截圖中的真實位址
 CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb"
