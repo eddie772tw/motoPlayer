@@ -11,6 +11,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
+from kivy.utils import platform
 from DMX import DMXController
 try:
     from DMX_test import DEVICE_ADDRESS
@@ -205,6 +206,13 @@ class DMXControlPanel(BoxLayout):
 
 class DMXApp(App):
     def build(self):
+        if platform == 'android':
+            from android.permissions import request_permissions, Permission
+            request_permissions([
+                Permission.BLUETOOTH_SCAN,
+                Permission.BLUETOOTH_CONNECT,
+                Permission.ACCESS_FINE_LOCATION
+            ])
         return DMXControlPanel()
 
 if __name__ == "__main__":
