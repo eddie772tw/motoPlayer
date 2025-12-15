@@ -10,10 +10,15 @@ class DMXController:
     """
     一個非同步的 DMX BLE 控制器類別，封裝了所有通訊協議。
     """
-    def __init__(self, device_address: str):
-        self._device_address = device_address
+    def __init__(self, device_target):
+        # device_target can be a MAC address string or a BLEDevice object
+        if hasattr(device_target, "address"):
+            self._device_address = device_target.address
+        else:
+            self._device_address = device_target
+            
         self._characteristic_uuid = "0000ffe1-0000-1000-8000-00805f9b34fb"
-        self._client = BleakClient(self._device_address, timeout=10.0)
+        self._client = BleakClient(device_target, timeout=10.0)
         self._lock = asyncio.Lock()
 
     @property
