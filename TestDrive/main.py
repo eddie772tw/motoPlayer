@@ -18,8 +18,8 @@ from kivy.core.window import Window
 from DMX import DMXController
 from bleak import BleakScanner, BleakClient, BleakError
 
-# 設定存檔檔名 (確保位於 main.py 同目錄)
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dmx_devices.json")
+# 設定存檔檔名 (於 DMXApp 中動態設定)
+DATA_FILE = "" 
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,11 @@ class ScanScreen(Screen):
         self.add_widget(layout)
 
     def on_leave(self):
-        self.stop_scan()
+        # 確保在離開頁面時停止掃描
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(self.stop_scan())
 
     def go_back(self, instance):
         self.manager.transition.direction = 'right'
@@ -133,10 +137,11 @@ class ScanScreen(Screen):
         
         asyncio.create_task(self._async_scan())
 
-    def stop_scan(self):
+    async def stop_scan(self):
         if self.scanner:
-            asyncio.create_task(self.scanner.stop())
+            scanner_to_stop = self.scanner
             self.scanner = None
+            await scanner_to_stop.stop()
         self.btn_scan.text = "Start Scan"
         self.btn_scan.background_color = (0.2, 0.8, 0.2, 1)
         self.status_label.text = "Scan Stopped"
@@ -424,6 +429,12 @@ class SettingsScreen(Screen):
         self.manager.current = 'scan'
 
     def open_config_file(self, instance):
+        if platform == 'android':
+            # Android 下切換到內建編輯器頁面
+            self.manager.transition.direction = 'left'
+            self.manager.current = 'json_editor'
+            return
+            
         if not os.path.exists(DATA_FILE):
              # Try to force create it if empty
             self.app.save_devices_to_disk()
@@ -665,6 +676,79 @@ class ControlScreen(Screen):
             logger.error(f"Command send error: {e}")
 
 # ---------------------------------------------------------
+# Page 3: JSON Raw Editor (JsonEditorScreen)
+# ---------------------------------------------------------
+class JsonEditorScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.app = App.get_running_app()
+        
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        
+        # Header
+        header = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        btn_back = Button(text="Cancel", size_hint_x=0.3)
+        btn_back.bind(on_press=self.go_back)
+        header.add_widget(btn_back)
+        header.add_widget(Label(text="Edit Device JSON", font_size=18))
+        self.btn_save = Button(text="Save", size_hint_x=0.3, background_color=(0.2, 0.8, 0.2, 1))
+        self.btn_save.bind(on_press=self.save_json)
+        header.add_widget(self.btn_save)
+        layout.add_widget(header)
+        
+        # Editor
+        self.editor = TextInput(
+            text="[]",
+            multiline=True,
+            font_name='Roboto', # Standard Kivy font
+            background_color=(0.1, 0.1, 0.1, 1),
+            foreground_color=(1, 1, 1, 1),
+            cursor_color=(1, 1, 1, 1),
+            size_hint_y=0.9
+        )
+        layout.add_widget(self.editor)
+        
+        self.add_widget(layout)
+
+    def on_enter(self):
+        """讀取暫存檔內容到編輯器"""
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, 'r') as f:
+                self.editor.text = f.read()
+        else:
+            self.editor.text = "[]"
+
+    def go_back(self, instance):
+        self.manager.transition.direction = 'right'
+        self.manager.current = 'settings'
+
+    def save_json(self, instance):
+        try:
+            # 驗證 JSON 語法
+            data = json.loads(self.editor.text)
+            if not isinstance(data, list):
+                raise ValueError("Content must be a JSON list of MAC addresses")
+            
+            # 寫入檔案
+            with open(DATA_FILE, 'w') as f:
+                f.write(self.editor.text)
+            
+            # 同步更新 App 數據
+            self.app.load_devices_from_disk()
+            
+            self.go_back(None)
+        except Exception as e:
+            # 顯示錯誤 (這裡可以使用 Kivy Popup，但簡單起見先改按鈕文字)
+            self.btn_save.text = "Error!"
+            self.btn_save.background_color = (1, 0.2, 0.2, 1)
+            def reset_btn(dt):
+                self.btn_save.text = "Save"
+                self.btn_save.background_color = (0.2, 0.8, 0.2, 1)
+            from kivy.clock import Clock
+            Clock.schedule_once(reset_btn, 2)
+            print(f"Save error: {e}")
+
+# ---------------------------------------------------------
 # App Main Program
 # ---------------------------------------------------------
 class DMXApp(App):
@@ -674,24 +758,39 @@ class DMXApp(App):
         self.saved_devices = [] # Store MAC address strings
 
     def build(self):
-        # Request Android permissions
+        global DATA_FILE
+        # 如果是 Android，使用私有資料夾；否則（如 Windows）優先使用程式同目錄
         if platform == 'android':
-            from android.permissions import request_permissions, Permission
-            request_permissions([
-                Permission.BLUETOOTH_SCAN,
-                Permission.BLUETOOTH_CONNECT,
-                Permission.ACCESS_FINE_LOCATION,
-                Permission.ACCESS_COARSE_LOCATION
-            ])
+            DATA_FILE = os.path.join(self.user_data_dir, "dmx_devices.json")
+        else:
+            DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dmx_devices.json")
         
-        self.load_devices_from_disk()
-
         # Create ScreenManager
         sm = ScreenManager()
         sm.add_widget(SettingsScreen(name='settings'))
         sm.add_widget(ScanScreen(name='scan'))
         sm.add_widget(ControlScreen(name='control'))
+        sm.add_widget(JsonEditorScreen(name='json_editor'))
         return sm
+
+    def on_start(self):
+        # Request Android permissions
+        if platform == 'android':
+            from android.permissions import request_permissions, Permission
+            def callback(permissions, results):
+                if all(results):
+                    logger.info("All permissions granted")
+                else:
+                    logger.info("Some permissions denied")
+                    
+            request_permissions([
+                Permission.BLUETOOTH_SCAN,
+                Permission.BLUETOOTH_CONNECT,
+                Permission.ACCESS_FINE_LOCATION,
+                Permission.ACCESS_COARSE_LOCATION
+            ], callback)
+        
+        self.load_devices_from_disk()
 
     def load_devices_from_disk(self):
         """Load device list from JSON"""
