@@ -2,6 +2,13 @@ import sys
 import os
 import subprocess
 import time
+# Copyright (C) 2026 eddie772tw
+# This file is part of motoPlayer.
+# motoPlayer is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 import argparse
 import serial.tools.list_ports
 

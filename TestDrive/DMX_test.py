@@ -1,3 +1,10 @@
+# Copyright (C) 2026 eddie772tw
+# This file is part of motoPlayer.
+# motoPlayer is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # dmx_test.py (版本 4 - 多功能測試)
 #
 # 整合了亮度、模式、速度等多項控制指令，

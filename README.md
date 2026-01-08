@@ -1,4 +1,4 @@
-# MotoPlayer
+# MotoPlayer [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 **MotoPlayer** 是一個整合式的智慧車載遙測與娛樂系統，專為機車（或汽車）設計。本專案結合了 Raspberry Pi 的強大運算能力與 MCU 的即時控制特性，提供即時的車輛數據監控、智慧燈光控制以及多媒體互動功能。
 
@@ -88,6 +88,17 @@ motoPlayer/
 - 更新相關的文檔與註解。
 - 確認 `.gitignore` 涵蓋了所有編譯產生的暫存檔。
 
+
 ## 授權
 
-本專案採用 MIT License。詳情請參閱 LICENSE 文件 (如有提供)。
+本專案採用 **GNU General Public License v3.0 (GPLv3)** 進行授權。
+
+Copyright (C) 2026 **eddie772tw**
+
+如果您修改或分發本程式：
+1. 您**必須**將您的修改後的專案同樣以 **GPLv3** 開源。
+2. 您**必須**提供完整的原始碼。
+3. 您**不得**將本專案的程式碼用於閉源的商業產品中。
+
+詳情請參閱 [LICENSE](LICENSE) 文件。
+

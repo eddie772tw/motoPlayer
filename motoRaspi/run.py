@@ -1,3 +1,10 @@
+# Copyright (C) 2026 eddie772tw
+# This file is part of motoPlayer.
+# motoPlayer is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # run.py (WebSocket version)
 
 from app import create_app, socketio
