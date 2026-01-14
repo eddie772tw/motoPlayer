@@ -15,7 +15,7 @@ import time
 import logging
 from typing import Optional
 
-from obd_converter import decode_pid_response
+from obd_converter import decode_pid_response, parse_fast_response
 
 try:
     from app.models import OBDData
@@ -34,6 +34,8 @@ ELM327_BASE_INIT = [
     "ATE0",
     "ATL0",
     "ATH0",
+    "ATS0",
+    "ATAT1",
 ]
 
 PIDS_TO_QUERY = {
@@ -109,54 +111,82 @@ class RealOBD:
         logging.info("OBD-II (RFCOMM) 連線已關閉。")
 
     def _send_command(self, command: str) -> str:
+        """發送指令並回傳 String (舊容相容)"""
+        raw = self._send_command_bytes(command)
+        return raw.decode('utf-8', errors='ignore').strip()
+
+    def _send_command_bytes(self, command: str) -> bytes:
+        """發送指令並回傳 Raw Bytes"""
         if not self.sock:
-            return "ERROR: NOT CONNECTED"
+            return b"ERROR"
         
+        # Flush input buffer
         self.sock.setblocking(False)
         try:
             while True:
-                self.sock.recv(1024)
+                r = self.sock.recv(1024)
+                if not r: break
         except bluetooth.btcommon.BluetoothError:
             pass
         self.sock.setblocking(True)
 
         self.sock.send((command + '\r').encode('utf-8'))
         
-        buffer = ""
+        buffer = b""
         while True:
             try:
                 data = self.sock.recv(1024)
                 if not data:
                     break
-                buffer += data.decode('utf-8', errors='ignore')
-                if '>' in buffer:
+                buffer += data
+                # 檢查結尾符號 '>'
+                if b'>' in buffer:
                     break
             except bluetooth.btcommon.BluetoothError as e:
                 if "timed out" in str(e):
-                    return "ERROR: TIMEOUT"
+                    logging.warning("OBD Command Timeout")
+                    return b"TIMEOUT"
                 raise e
-        return buffer.strip()
+        return buffer
 
-    def _parse_voltage(self, response: str) -> Optional[float]:
+    def _parse_voltage(self, response: bytes) -> Optional[float]:
         try:
-            return float(response.replace("V", ""))
+            # ATRV response: b'12.4V'
+            s = response.decode('utf-8', errors='ignore').replace("V", "").strip()
+            return float(s)
         except:
             return None
 
-    def get_obd_data(self) -> OBDData:
+    def get_fast_data(self) -> OBDData:
+        """
+        使用優化後的批次讀取模式。
+        一次發送 0104050C0D11 (Load, Coolant, RPM, Speed, Throttle)
+        """
         if not self.is_connected:
             return OBDData()
 
-        results = {}
-        for key, pid in PIDS_TO_QUERY.items():
-            raw_response = self._send_command(pid)
-            
-            if pid == "ATRV":
-                results[key] = self._parse_voltage(raw_response)
-            else:
-                results[key] = decode_pid_response(pid, raw_response)
-        
-        return OBDData(**results)
+        # 1. 批次讀取主要行車數據
+        # 04:Load, 05:Temp, 0C:RPM, 0D:Speed, 11:Throttle
+        raw_response = self._send_command_bytes("0104050C0D11")
+        parsed = parse_fast_response(raw_response)
+
+        # 2. 獨立讀取電壓 (非標準 PID)
+        volt_resp = self._send_command_bytes("ATRV")
+        voltage = self._parse_voltage(volt_resp)
+
+        # 3. 組裝 OBDData
+        return OBDData(
+            rpm=parsed.get("0C"),
+            speed=parsed.get("0D"),
+            coolant_temp=parsed.get("05"),
+            engine_load=parsed.get("04"),
+            throttle_pos=parsed.get("11"),
+            battery_voltage=voltage
+        )
+
+    def get_obd_data(self) -> OBDData:
+        # 將默認行為切換為 Fast Data 模式
+        return self.get_fast_data()
 
 if __name__ == '__main__':
     # [MODIFIED] 更新日誌格式
